@@ -796,7 +796,14 @@ class _CompactionHandler:
             try:
                 await hook.before_compact(state)
             except Exception:  # noqa: BLE001 - hook isolation contract
-                pass
+                log.warning(
+                    "compaction_hook_failed",
+                    hook=getattr(hook, "name", type(hook).__name__),
+                    phase="before_compact",
+                    session_key=state.session_key,
+                    agent_id=state.agent_id,
+                    exc_info=True,
+                )
 
     async def _fire_after_compact(
         self,
@@ -807,7 +814,14 @@ class _CompactionHandler:
             try:
                 await hook.after_compact(state, outcome)
             except Exception:  # noqa: BLE001 - hook isolation contract
-                pass
+                log.warning(
+                    "compaction_hook_failed",
+                    hook=getattr(hook, "name", type(hook).__name__),
+                    phase="after_compact",
+                    session_key=state.session_key,
+                    agent_id=state.agent_id,
+                    exc_info=True,
+                )
 
 # ---------------------------------------------------------------------------
 # Outer stage class

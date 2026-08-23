@@ -45,6 +45,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+import structlog
+
+log = structlog.get_logger(__name__)
+
 if TYPE_CHECKING:
     from agentos.engine.agent import Agent
     from agentos.engine.hooks.types import CompactionHook
@@ -339,13 +343,29 @@ class CompactionAndHistoryStage:
             try:
                 await hook.before_compact(state)
             except Exception:  # noqa: BLE001 — hook isolation contract
-                # A buggy hook MUST NOT break the turn. Swallow per
-                # protocol; observability is the runtime's concern.
-                pass
+                # A buggy hook MUST NOT break the turn. Still record it:
+                # during compaction a throwing hook can lose memory data,
+                # and "observability is the runtime's concern" means the
+                # runtime (here) must emit the trace, not swallow it.
+                log.warning(
+                    "compaction_hook_failed",
+                    hook=getattr(hook, "name", type(hook).__name__),
+                    phase="before_compact",
+                    session_key=getattr(state, "session_key", ""),
+                    agent_id=getattr(state, "agent_id", ""),
+                    exc_info=True,
+                )
 
     async def _fire_after_compact(self, state: Any, outcome: Any) -> None:
         for hook in self._compaction_hooks:
             try:
                 await hook.after_compact(state, outcome)
             except Exception:  # noqa: BLE001 — hook isolation contract
-                pass
+                log.warning(
+                    "compaction_hook_failed",
+                    hook=getattr(hook, "name", type(hook).__name__),
+                    phase="after_compact",
+                    session_key=getattr(state, "session_key", ""),
+                    agent_id=getattr(state, "agent_id", ""),
+                    exc_info=True,
+                )
