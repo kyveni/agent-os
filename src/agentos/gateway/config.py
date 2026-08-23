@@ -619,8 +619,6 @@ class MemoryConfig(BaseSettings):
     )
     capture_max_chars: int = 2000
     capture_roll_max_chars: int = Field(default=50_000, ge=0)
-    daily_note_max_chars: int = Field(default=4000, ge=0)
-    daily_notes_total_max_chars: int = Field(default=8000, ge=0)
 
     # Retriever tuning
     temporal_decay_enabled: bool = False
@@ -2154,8 +2152,6 @@ class GatewayConfig(BaseSettings):
             "mode": "stable",
             "prompt_cache_mode": self.prompt_cache.effective_mode,
             "query_embedding_cache": self.memory.cost.query_embedding_cache,
-            "daily_note_max_chars": str(self.memory.daily_note_max_chars),
-            "daily_notes_total_max_chars": str(self.memory.daily_notes_total_max_chars),
             "auto_capture_enabled": str(self.memory.auto_capture_enabled).lower(),
             "capture_effective_enabled": str(capture_effective_enabled).lower(),
             "capture_mode": self.memory.capture_mode,

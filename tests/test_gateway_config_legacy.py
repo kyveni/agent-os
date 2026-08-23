@@ -43,6 +43,8 @@ _ALL_DEPRECATED_MEMORY_FIELDS = {
     "memory.eviction_policy": "lru",
     "memory.summary_model": "gpt-4o-mini",
     "memory.summary_max_tokens": "256",
+    "memory.daily_note_max_chars": "4000",
+    "memory.daily_notes_total_max_chars": "8000",
 }
 
 
