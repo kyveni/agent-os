@@ -6,6 +6,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.8.24] - 2026-08-24
+
+### Added
+
+- Channel tool approvals are now native interactive surfaces. Telegram inline
+  keyboards, Slack Block Kit actions, and Discord message components render an
+  Approve/Deny pair for a gated tool call instead of asking the operator to type
+  a reply. Every click is authorized before it is honoured: the clicker must
+  pass the channel's own access policy and be an admitted paired user, the
+  approval is bound to the `sessionKey` that raised it so a click from another
+  session is refused, and the surface is offered only in DMs, where the session
+  key is `PER_CHANNEL_PEER` and the approver is unambiguous. Slack request
+  signatures are verified against the raw request body rather than a parsed
+  form, so verification no longer depends on the ASGI body having survived a
+  read. Closes #364.
+
+- Cost visibility. A usage ledger records the cost of each turn and attributes
+  it per tool and per skill through a `ContextVar` that follows the call into
+  nested execution, and a new `agentos cost` command queries it with filters for
+  session, model, tool, skill, and time range, plus export. The router gains a
+  `cost_aware` flag (on by default) that substitutes the cheapest tier capable
+  of the request; image-only tiers are filtered out before the comparison, so a
+  text request is never routed to an image model. Closes #366.
+
+- Aeon (`aeonfun/aeon`) joins Robinhood, Bankr, and Capminal as a Partner Skills
+  source in the Skills hub, with the partner tabs ordered Robinhood, Bankr,
+  Aeon, Capminal, Community.
+
+### Fixed
+
+- The gateway no longer accepts an auth token from the query string, where it
+  would be captured by proxy and server access logs; the uvicorn access log is
+  gated behind `config.debug` for the same reason. Closes #350.
+
+- Rate limiting reads `X-Forwarded-For` only from a verified trusted proxy, and
+  the per-client dict is bounded, so a spoofed header can neither bypass the
+  limiter nor grow it without limit. Closes #354.
+
+- Unhandled gateway exceptions are redacted before they reach the client; the
+  detail is shown only when `debug` is set. Closes #353.
+
+- The `browser` tool refuses `data:` URLs, which could otherwise carry a page
+  past the SSRF check and the domain allowlist; `about:blank` remains the only
+  permitted hostless target. Closes #356.
+
+- The `usage cost` fallback path declines query filters it cannot honour instead
+  of silently dropping them and returning an empty result set.
+
+### Removed
+
+- Dead configuration keys that no code read: `sandbox.network_default` (#360),
+  the memory daily-note keys (#405), and `subagents.archive_after_minutes`
+  (#407).
+
+### Docs
+
+- `cron_default_mode` — the default elevation posture for unattended cron jobs,
+  shipped in 2026.8.21 — is now documented where it is set and where it is read:
+  `agentos.toml.example`, the bundled `agentos` skill, and the approvals and
+  permissions guide. (#413)
+
 ## [2026.8.23] - 2026-08-23
 
 ### Added

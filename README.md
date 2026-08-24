@@ -37,7 +37,7 @@ OpenAI, Anthropic, Ollama, DeepSeek, Gemini, Qwen/DashScope, and 20+
 other providers. You do not need to change your code or config to
 switch providers.
 
-AgentOS 2026.8.23 is the current release. The project website is
+AgentOS 2026.8.24 is the current release. The project website is
 [useagentos.dev](https://useagentos.dev). Follow
 [@useAgentOS](https://x.com/useAgentOS) on X for updates.
 
@@ -225,14 +225,14 @@ agentos gateway run
 > new terminal window. Or run the PATH command from step 1 again.
 
 For an install pinned to one exact version, add `==<version>` — for
-example `uv tool install --python 3.12 "use-agent-os[recommended]==2026.8.23"` —
+example `uv tool install --python 3.12 "use-agent-os[recommended]==2026.8.24"` —
 or use the GitHub release wheel link directly:
-`https://github.com/use-agent-os/agent-os/releases/download/v2026.8.23/use_agent_os-2026.8.23-py3-none-any.whl`.
+`https://github.com/use-agent-os/agent-os/releases/download/v2026.8.24/use_agent_os-2026.8.24-py3-none-any.whl`.
 
 > [!NOTE]
 > Release install commands use published GitHub release assets.
 > Python wheel installs use versioned wheel filenames — for example
-> `use_agent_os-2026.8.23-py3-none-any.whl` — because the installers validate the
+> `use_agent_os-2026.8.24-py3-none-any.whl` — because the installers validate the
 > version segment inside the wheel filename, so there is no `latest`
 > wheel alias. Only the Windows portable zip has a version-independent
 > `releases/latest/download/` alias.
@@ -483,6 +483,20 @@ $env:OPENROUTER_API_KEY="sk-..."
 agentos onboard --provider openrouter --api-key-env OPENROUTER_API_KEY
 ```
 
+**Windows Command Prompt (cmd.exe)**
+
+```cmd
+set OPENROUTER_API_KEY=sk-...
+agentos onboard --provider openrouter --api-key-env OPENROUTER_API_KEY
+```
+
+> **CMD note:** `cmd.exe` does not support PowerShell `$env:` syntax.
+> If you see *"The filename, directory name, or volume label syntax is
+> incorrect"*, use `set VAR=value` (no quotes, no `$env:` prefix) or
+> switch to PowerShell. See
+> [troubleshooting.md](docs/troubleshooting.md#windows-cmd-vs-powershell-syntax)
+> for the full comparison table.
+
 OpenRouter is just one example — you can use any supported provider
 and its own API key variable instead.
 
@@ -579,6 +593,13 @@ uses websocket mode by default, Telegram uses polling, and Slack can
 use Socket Mode — none of these need a public URL. Telegram webhook
 mode and Slack webhook mode do need a public URL that the provider
 can reach.
+
+> **Choosing a transport:** For local or development setups without a
+> public domain, **use polling** (the default for Telegram) or Socket Mode
+> (for Slack). Webhook mode only works when the provider can reach your
+> server over HTTPS. See
+> [troubleshooting.md](docs/troubleshooting.md#channel-transport-polling-vs-webhook)
+> for the full comparison.
 
 **Public network binding**
 

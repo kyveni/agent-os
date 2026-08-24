@@ -26,13 +26,14 @@ before the gateway will bind to a public address (`0.0.0.0` / LAN): the startup
 guard refuses to serve an unauthenticated public bind, and a token is
 auto-generated when unset. See [`gateway.md`](gateway.md) for bind safety.
 
-When auth is enabled, send the token any one of these ways (checked in order):
+When auth is enabled, send the token via HTTP headers (checked in order):
 
 ```text
 Authorization: Bearer <token>
 X-Agentos-Token: <token>
-?token=<token>          # query parameter
 ```
+
+> **Note:** Query-string tokens (`?token=<token>`) are rejected (`401 Unauthorized`). Passing tokens in URL query parameters is not supported to prevent token leaks in access logs, browser history, and HTTP referrers.
 
 `/health` and `/ready` never require a token. Cross-origin browser requests are
 governed by CORS configuration regardless of auth mode.

@@ -154,6 +154,8 @@ list <name>`, `approve <name> <code>`, `deny <name> <sender-id>`, or `revoke
 groups are disabled by default; enable them only with explicit
 `group_chat_ids`, paired senders, and the desired mention requirement.
 
+Platform-native interactive tool approvals (Slack block actions, Telegram inline keyboard callbacks, and Discord message components) allow operators to approve or deny gated tool executions directly using interactive buttons. For security, these approvals are restricted to channel DMs (never group chats), access-gated by evaluating the clicker's sender ID against the channel's access policy, and strictly session-bound to their originating chat context.
+
 ## Configuration
 
 File resolution (highest precedence first):
@@ -340,6 +342,7 @@ agentos skills search <query>
 agentos skills install <name>                    # from ClawHub (default source)
 agentos skills install owner/repo:path -s github # from a GitHub repo/URL
 agentos skills install <bankr-skill-url> -s bankr # from Bankr (repo or bankr.bot URL)
+agentos skills install <aeon-skill-url> -s aeon   # from Aeon (aeonfun/aeon skills/<slug>)
 agentos skills tap add owner/repo      # register a GitHub repo as a skill source
 agentos skills tap list
 agentos skills update
@@ -497,6 +500,12 @@ agentos cron add --every 10m --job-kind agent_turn --script watch_rss.py \
 # read-only instead. See docs/cli.md before suggesting either.
 agentos cron add --every 6h --agent main --no-elevated --name "LP check" --text "..."
 agentos cost                   # usage + estimated spend
+# cost support filtering and grouping:
+# agentos cost [--by-model] [--json] [--csv]
+# agentos cost --start-date YYYY-MM-DD --end-date YYYY-MM-DD
+# agentos cost --agent-id <agent-id> --channel-type <channel-type>
+# agentos cost --tool-name <tool-name> --skill <skill-name>
+# agentos cost --export /path/to/export.csv
 agentos diagnostics on         # runtime diagnostics logging
 agentos migrate hermes --source <dir> [--apply]   # dry-run first, then --apply
 ```

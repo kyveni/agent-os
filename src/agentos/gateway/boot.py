@@ -2430,6 +2430,7 @@ async def start_gateway_server(
             "host": config.host,
             "port": config.port,
             "log_level": "info" if not config.debug else "debug",
+            "access_log": config.debug,
         }
         if config.tls.keyfile and config.tls.certfile:
             uvicorn_kwargs["ssl_keyfile"] = config.tls.keyfile

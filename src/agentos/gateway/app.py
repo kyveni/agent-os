@@ -237,10 +237,7 @@ def create_gateway_app(
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
             return auth_header[7:]
-        token_header = request.headers.get("x-agentos-token")
-        if token_header:
-            return token_header
-        return request.query_params.get("token")
+        return request.headers.get("x-agentos-token")
 
     def _make_ctx(request: Request | None = None) -> RpcContext:
         from agentos.gateway.auth import denied_access, resolve_auth
@@ -564,7 +561,7 @@ def create_gateway_app(
     # ── Middleware ───────────────────────────────────────────────────────────
 
     middleware = [
-        Middleware(ErrorHandlingMiddleware),
+        Middleware(ErrorHandlingMiddleware, debug=config.debug),
         # DNS-rebinding guard: reject foreign Host headers on a loopback bind
         # (no-op ["*"] on a public bind, which is already auth-gated).
         Middleware(LoopbackHostMiddleware, allowed_hosts=resolve_trusted_hosts(config)),
