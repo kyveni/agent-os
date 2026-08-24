@@ -483,6 +483,20 @@ $env:OPENROUTER_API_KEY="sk-..."
 agentos onboard --provider openrouter --api-key-env OPENROUTER_API_KEY
 ```
 
+**Windows Command Prompt (cmd.exe)**
+
+```cmd
+set OPENROUTER_API_KEY=sk-...
+agentos onboard --provider openrouter --api-key-env OPENROUTER_API_KEY
+```
+
+> **CMD note:** `cmd.exe` does not support PowerShell `$env:` syntax.
+> If you see *"The filename, directory name, or volume label syntax is
+> incorrect"*, use `set VAR=value` (no quotes, no `$env:` prefix) or
+> switch to PowerShell. See
+> [troubleshooting.md](docs/troubleshooting.md#windows-cmd-vs-powershell-syntax)
+> for the full comparison table.
+
 OpenRouter is just one example — you can use any supported provider
 and its own API key variable instead.
 
@@ -579,6 +593,13 @@ uses websocket mode by default, Telegram uses polling, and Slack can
 use Socket Mode — none of these need a public URL. Telegram webhook
 mode and Slack webhook mode do need a public URL that the provider
 can reach.
+
+> **Choosing a transport:** For local or development setups without a
+> public domain, **use polling** (the default for Telegram) or Socket Mode
+> (for Slack). Webhook mode only works when the provider can reach your
+> server over HTTPS. See
+> [troubleshooting.md](docs/troubleshooting.md#channel-transport-polling-vs-webhook)
+> for the full comparison.
 
 **Public network binding**
 

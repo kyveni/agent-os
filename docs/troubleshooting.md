@@ -80,10 +80,31 @@ agentos providers configure openrouter
 
 Use environment-variable secrets:
 
+**Linux / macOS**
+
 ```sh
 export OPENAI_API_KEY="sk-..."
 agentos configure provider --provider openai --api-key-env OPENAI_API_KEY
 ```
+
+**Windows PowerShell**
+
+```powershell
+$env:OPENAI_API_KEY="sk-..."
+agentos configure provider --provider openai --api-key-env OPENAI_API_KEY
+```
+
+**Windows Command Prompt (cmd.exe)**
+
+```cmd
+set OPENAI_API_KEY=sk-...
+agentos configure provider --provider openai --api-key-env OPENAI_API_KEY
+```
+
+> **Windows CMD note:** `cmd.exe` does not support PowerShell syntax like
+> `$env:VAR="value"`. If you see `The filename, directory name, or volume
+> label syntax is incorrect`, you are likely using PowerShell syntax inside
+> `cmd.exe`. Use `set VAR=value` instead (no quotes, no `$env:` prefix).
 
 ## Router Dependency Problems
 
@@ -290,6 +311,71 @@ valid, but the process is then unreachable from the host.
 - ONNX Runtime and Pilot Router may need extra system packages depending on
   the base image. The repo Dockerfile handles this; a custom image may not.
 - Mount `~/.agentos` if config and sessions should persist across restarts.
+
+## Windows CMD vs PowerShell Syntax
+
+AgentOS uses environment variables for secrets and configuration. On
+Windows, the syntax depends on which shell you are using.
+
+| Shell | Set a variable | Example |
+|-------|---------------|--------|
+| **Linux / macOS** (bash, zsh) | `export VAR="val"` | `export OPENAI_API_KEY="sk-..."` |
+| **Windows PowerShell** | `$env:VAR="val"` | `$env:OPENAI_API_KEY="sk-..."` |
+| **Windows CMD** | `set VAR=val` | `set OPENAI_API_KEY=sk-...` |
+
+Common mistakes:
+
+- Using `$env:VAR="val"` inside `cmd.exe` produces the error:
+  `The filename, directory name, or volume label syntax is incorrect.`
+  Switch to `set VAR=val` or open PowerShell instead.
+- Using `set VAR=val` inside PowerShell silently creates a literal
+  variable (not an environment variable visible to child processes).
+  Use `$env:VAR="val"` in PowerShell.
+- Quotes around values: `cmd.exe` `set` does not use quotes.
+  `set VAR="val"` stores the quotes literally. Write `set VAR=val`.
+
+If you are unsure which shell you are in, check:
+
+```powershell
+# PowerShell
+$PSVersionTable.PSVersion
+```
+
+```cmd
+REM Command Prompt
+echo %COMSPEC%
+```
+
+## Channel Transport: Polling vs Webhook
+
+When you set up a messaging channel (Telegram, Discord, Slack), you
+choose how the provider delivers messages to your gateway.
+
+- **Polling** — the gateway connects to the provider and pulls new
+  messages on a timer. No public URL needed. This is the easiest option
+  for local machines behind NAT or a home router.
+- **Webhook** — the provider pushes messages to a public HTTPS URL on
+  your gateway. This requires a publicly reachable domain with a valid
+  TLS certificate.
+
+For local or development setups that do not have a public domain,
+**use polling mode**:
+
+- **Telegram** defaults to polling.
+- **Discord** uses websocket mode (similar to polling, no URL needed).
+- **Slack** can use Socket Mode (no URL needed).
+
+To switch Telegram from polling to webhook (for production servers
+with a public domain):
+
+```toml
+[channels.telegram.my_bot]
+delivery.mode = "webhook"
+delivery.webhook_url = "https://your-domain.example.com/webhooks/telegram"
+```
+
+If you select webhook without a reachable URL, the channel status will
+show `connected=false`. Run `agentos doctor` for diagnostics.
 
 ## Still Stuck?
 
