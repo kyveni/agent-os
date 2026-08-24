@@ -16,6 +16,7 @@ from xml.etree import ElementTree as ET
 import structlog
 
 from agentos.identity.workspace import BOOTSTRAP_FILENAMES
+from agentos.redact import redact_sensitive_text
 from agentos.sandbox.integration import get_runtime, sandboxed
 from agentos.tools.fuzzy_match import (
     AmbiguousMatchError,
@@ -512,10 +513,15 @@ async def read_file(path: str, offset: int | None = None, limit: int | None = No
     if binary_reason:
         raise _binary_file_error(path, p, reason=binary_reason)
 
-    return await loop.run_in_executor(
+    content = await loop.run_in_executor(
         None,
         lambda: _stream_numbered_lines_from_file(p, path, offset=offset, limit=limit),
     )
+    # Defense-in-depth: even when the path denylist is bypassed by
+    # elevated-full mode, mask secrets in file content so credentials
+    # are not returned verbatim into the transcript.
+    redacted = redact_sensitive_text(content, file_read=True)
+    return redacted if redacted is not None else content
 
 
 @tool(
@@ -574,7 +580,11 @@ async def read_spreadsheet(
         )
 
     selected = _select_spreadsheet_sheets(sheets, sheet)
-    return _format_spreadsheet(path=p, sheets=selected, offset=row_offset, limit=row_limit)
+    result = _format_spreadsheet(path=p, sheets=selected, offset=row_offset, limit=row_limit)
+    # Defense-in-depth: mask secrets in spreadsheet content even when
+    # elevated-full mode bypasses the path denylist.
+    redacted = redact_sensitive_text(result, file_read=True)
+    return redacted if redacted is not None else result
 
 
 def _read_delimited_rows(path: Path, delimiter: str) -> list[tuple[str, list[list[str]]]]:
@@ -982,7 +992,13 @@ async def grep_search(
         return json.dumps(blocked)
     _gate_workspace_strict_read("grep_search", base, path or str(base))
 
+    # If elevated-full bypassed the path denylist, still redact secrets
+    # from grep output as defense-in-depth.
+    from agentos.tools.builtin.shell import _context_elevated_mode as _grep_elevated
+    _should_redact = _grep_elevated() == "full"
+
     loop = asyncio.get_event_loop()
+
     strict_roots = _strict_read_roots()
     workspace_root = _workspace_root()
 
@@ -1001,7 +1017,12 @@ async def grep_search(
                 text = fp.read_text(encoding="utf-8", errors="replace")
                 for lineno, line in enumerate(text.splitlines(), 1):
                     if regex.search(line):
-                        results.append(f"{fp}:{lineno}: {line.rstrip()}")
+                        display = line.rstrip()
+                        if _should_redact:
+                            r = redact_sensitive_text(display, file_read=True)
+                            if r is not None:
+                                display = r
+                        results.append(f"{fp}:{lineno}: {display}")
                         if len(results) >= max_results:
                             return
             except (PermissionError, OSError):

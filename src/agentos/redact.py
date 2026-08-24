@@ -41,7 +41,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 
 __all__ = [
     "is_env_dump_command",
@@ -473,20 +473,27 @@ def redact_sensitive_text(
         )
         text = _SECRET_HEADER_RE.sub(lambda m: f"{m.group(1)}{_mask_token(m.group(2))}", text)
 
-    if not code_file and ("=" in text or ":" in text):
+    if not code_file and not file_read and ("=" in text or ":" in text):
         text = _redact_assignments(text)
+    # file_read still runs the assignment pass so secrets like KEY=value are
+    # masked, but uses the non-reusable sentinel so the agent cannot write a
+    # corrupted value back.
+    if file_read and ("=" in text or ":" in text):
+        text = _redact_assignments(text, mask_fn=_mask_nonreusable)
     return text
 
 
-def _redact_assignments(text: str) -> str:
+def _redact_assignments(text: str, *, mask_fn: Callable[[str], str] | None = None) -> str:
     """Mask the value half of ``NAME=secret`` / ``"name": "secret"`` pairs."""
+
+    _mask = mask_fn or _mask_token
 
     def _replace(match: re.Match[str]) -> str:
         name = match.group(1)
         value = match.group(2) or match.group(3) or match.group(4) or ""
         if not _is_credential_name(name) or not _is_secret_literal_value(value):
             return match.group(0)
-        return match.group(0).replace(value, _mask_token(value))
+        return match.group(0).replace(value, _mask(value))
 
     return _ASSIGNMENT_RE.sub(_replace, text)
 
