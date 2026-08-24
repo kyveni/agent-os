@@ -109,7 +109,48 @@ class ClawHubSource(SkillSource):
             with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
                 import posixpath
 
-                for name in zf.namelist():
+                # Decompression guard: reject zip bombs before reading entries.
+                # A small on-disk archive should not explode into gigabytes.
+                max_entries = 1_000
+                max_per_entry_bytes = 50 * 1024 * 1024  # 50 MB
+                max_total_bytes = 100 * 1024 * 1024  # 100 MB
+
+                names = zf.namelist()
+                if len(names) > max_entries:
+                    log.warning(
+                        "clawhub.fetch_too_many_entries",
+                        identifier=identifier,
+                        entries=len(names),
+                        limit=max_entries,
+                    )
+                    return None
+
+                # Check declared uncompressed sizes before reading.
+                total_declared = 0
+                for info in zf.infolist():
+                    if info.is_dir():
+                        continue
+                    if info.file_size > max_per_entry_bytes:
+                        log.warning(
+                            "clawhub.fetch_entry_too_large",
+                            identifier=identifier,
+                            entry=info.filename,
+                            declared=info.file_size,
+                            limit=max_per_entry_bytes,
+                        )
+                        return None
+                    total_declared += info.file_size
+                if total_declared > max_total_bytes:
+                    log.warning(
+                        "clawhub.fetch_total_too_large",
+                        identifier=identifier,
+                        declared=total_declared,
+                        limit=max_total_bytes,
+                    )
+                    return None
+
+                running_total = 0
+                for name in names:
                     if name.endswith("/"):
                         continue
                     parts = name.split("/", 1)
@@ -117,8 +158,28 @@ class ClawHubSource(SkillSource):
                     rel = posixpath.normpath(rel)
                     if rel.startswith("..") or rel.startswith("/"):
                         continue
+                    # Also block Windows-style path traversal that posixpath misses.
+                    if "\\" in rel or ":" in rel:
+                        continue
                     try:
                         raw = zf.read(name)
+                    except Exception:
+                        log.warning(
+                            "clawhub.fetch_entry_read_error",
+                            identifier=identifier,
+                            entry=name,
+                        )
+                        return None
+                    running_total += len(raw)
+                    if running_total > max_total_bytes:
+                        log.warning(
+                            "clawhub.fetch_real_total_exceeded",
+                            identifier=identifier,
+                            real_total=running_total,
+                            limit=max_total_bytes,
+                        )
+                        return None
+                    try:
                         if rel == "SKILL.md":
                             files[rel] = raw.decode("utf-8")
                         else:
