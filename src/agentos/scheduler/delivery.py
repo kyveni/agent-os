@@ -335,6 +335,7 @@ class DeliveryChain:
             channel_name=channel_name,
             channel_id=channel_id,
             thread_id=thread_id,
+            account_id=job.delivery.account_id,
         )
 
     async def _deliver_origin_webchat_to_session(
@@ -414,15 +415,46 @@ class DeliveryChain:
         channel_name: str,
         channel_id: str,
         thread_id: str,
+        account_id: str = "",
     ) -> str:
-        """Send ``text`` via the registered channel adapter for ``channel_name``."""
+        """Send ``text`` via the registered channel adapter for ``channel_name``.
+
+        When ``account_id`` is set, the channel manager resolves the concrete
+        account/adapter instance authoritatively; an unknown or ambiguous
+        account fails loudly instead of silently delivering from the wrong one.
+        """
         text = strip_reply_directives(text) or ""
         if not self._channel_manager_ref:
             return "skipped"
         cm = self._channel_manager_ref()
         if cm is None:
             return "skipped"
-        adapter = cm.get(channel_name)
+        adapter = None
+        if account_id.strip():
+            resolved = cm.resolve_delivery_target(
+                target=channel_name,
+                to=channel_id,
+                account_id=account_id,
+                thread_id=thread_id,
+            )
+            if not resolved.ok:
+                log.warning(
+                    "delivery.account_resolution_failed",
+                    job_id=job_id,
+                    channel=channel_name,
+                    account_id=account_id,
+                    reason=resolved.reason,
+                )
+                return _failed(
+                    f"account {account_id!r} cannot serve channel {channel_name!r}: "
+                    f"{resolved.reason}"
+                )
+            adapter = resolved.adapter
+            channel_name = resolved.channel_type or channel_name
+            channel_id = resolved.to or channel_id
+            thread_id = resolved.thread_id or ""
+        else:
+            adapter = cm.get(channel_name)
         if adapter is None:
             log.warning(
                 "delivery.adapter_not_found",

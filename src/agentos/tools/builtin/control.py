@@ -867,7 +867,8 @@ def _session_storage_or_none() -> Any:
                     "type": "string",
                     "description": (
                         "Optional account binding for multi-account channels. "
-                        "Stored on the job but not yet honoured by channel delivery."
+                        "Channel delivery resolves the named account's adapter "
+                        "and fails loudly when the account is unknown."
                     ),
                 },
                 "thread_id": {
