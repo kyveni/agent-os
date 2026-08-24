@@ -96,7 +96,7 @@ class DeliveryConfig:
     mode: DeliveryMode = DeliveryMode.NONE
     channel_name: str = ""  # adapter key: "slack", "discord", "telegram"
     channel_id: str = ""  # target channel/chat ID
-    account_id: str = ""  # optional account binding for multi-account channels
+    account_id: str = ""  # optional account binding; threaded to adapter for multi-account channels
     thread_id: str = ""  # optional thread ID
     ws_topic: str = ""  # WS targeted push topic, default "cron:{job_id}"
     originating_reply_target: ReplyTargetSnapshot | None = None

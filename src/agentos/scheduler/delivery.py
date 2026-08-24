@@ -298,6 +298,11 @@ class DeliveryChain:
             if target is not None and target.kind == "channel" and target.to is not None
             else job.delivery.channel_id
         )
+        account_id = (
+            target.account_id
+            if target is not None and target.kind == "channel" and target.account_id
+            else job.delivery.account_id
+        )
         thread_id = (
             target.thread_id
             if target is not None and target.kind == "channel"
@@ -334,6 +339,7 @@ class DeliveryChain:
             text=text,
             channel_name=channel_name,
             channel_id=channel_id,
+            account_id=account_id,
             thread_id=thread_id,
         )
 
@@ -412,17 +418,56 @@ class DeliveryChain:
         job_id: str,
         text: str,
         channel_name: str,
-        channel_id: str,
-        thread_id: str,
+        channel_id: str = "",
+        account_id: str = "",
+        thread_id: str = "",
     ) -> str:
-        """Send ``text`` via the registered channel adapter for ``channel_name``."""
+        """Send ``text`` via the registered channel adapter for ``channel_name``.
+
+        When ``account_id`` is provided on a multi-account channel, resolve the
+        specific adapter instance instead of falling back to the first match.
+        """
         text = strip_reply_directives(text) or ""
         if not self._channel_manager_ref:
             return "skipped"
         cm = self._channel_manager_ref()
         if cm is None:
             return "skipped"
-        adapter = cm.get(channel_name)
+
+        # Resolve the adapter, honouring account_id for multi-account channels.
+        if account_id:
+            resolution = cm.resolve_delivery_target(
+                target=channel_name,
+                to=channel_id,
+                account_id=account_id,
+                thread_id=thread_id,
+            )
+            if not resolution.ok:
+                log.warning(
+                    "delivery.account_resolution_failed",
+                    job_id=job_id,
+                    channel=channel_name,
+                    account_id=account_id,
+                    reason=resolution.reason,
+                )
+                # Fall back to the default adapter for the channel type
+                # so we never silently drop delivery when an account binding
+                # cannot be resolved.
+                adapter = cm.get(channel_name)
+            else:
+                adapter = resolution.adapter
+                channel_id = resolution.to or channel_id
+                thread_id = resolution.thread_id or thread_id
+                log.info(
+                    "delivery.account_resolved",
+                    job_id=job_id,
+                    channel=channel_name,
+                    account_id=account_id,
+                    adapter_name=resolution.adapter_name,
+                )
+        else:
+            adapter = cm.get(channel_name)
+
         if adapter is None:
             log.warning(
                 "delivery.adapter_not_found",
@@ -542,6 +587,7 @@ class DeliveryChain:
                 text=text,
                 channel_name=fd.channel_name,
                 channel_id=fd.channel_id,
+                account_id=fd.account_id,
                 thread_id=fd.thread_id,
             )
         return "skipped"
