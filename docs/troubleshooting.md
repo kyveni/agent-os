@@ -80,8 +80,24 @@ agentos providers configure openrouter
 
 Use environment-variable secrets:
 
+**Linux / macOS**
+
 ```sh
 export OPENAI_API_KEY="sk-..."
+agentos configure provider --provider openai --api-key-env OPENAI_API_KEY
+```
+
+**Windows PowerShell**
+
+```powershell
+$env:OPENAI_API_KEY="sk-..."
+agentos configure provider --provider openai --api-key-env OPENAI_API_KEY
+```
+
+**Windows Command Prompt (cmd.exe)**
+
+```cmd
+set OPENAI_API_KEY=sk-...
 agentos configure provider --provider openai --api-key-env OPENAI_API_KEY
 ```
 
@@ -290,6 +306,40 @@ valid, but the process is then unreachable from the host.
 - ONNX Runtime and Pilot Router may need extra system packages depending on
   the base image. The repo Dockerfile handles this; a custom image may not.
 - Mount `~/.agentos` if config and sessions should persist across restarts.
+
+## Windows CMD vs PowerShell Syntax
+
+AgentOS uses environment variables for secrets and configuration. On
+Windows, the syntax depends on which shell you are using.
+
+| Shell | Set a variable | Example |
+|-------|---------------|--------|
+| **Linux / macOS** (bash, zsh) | `export VAR="val"` | `export OPENAI_API_KEY="sk-..."` |
+| **Windows PowerShell** | `$env:VAR="val"` | `$env:OPENAI_API_KEY="sk-..."` |
+| **Windows CMD** | `set VAR=val` | `set OPENAI_API_KEY=sk-...` |
+
+Common mistakes:
+
+- Using `$env:VAR="val"` inside `cmd.exe` produces the error:
+  `The filename, directory name, or volume label syntax is incorrect.`
+  Switch to `set VAR=val` or open PowerShell instead.
+- Using `set VAR=val` inside PowerShell silently creates a literal
+  variable (not an environment variable visible to child processes).
+  Use `$env:VAR="val"` in PowerShell.
+- Quotes around values: `cmd.exe` `set` does not use quotes.
+  `set VAR="val"` stores the quotes literally. Write `set VAR=val`.
+
+If you are unsure which shell you are in, check:
+
+```powershell
+# PowerShell
+$PSVersionTable.PSVersion
+```
+
+```cmd
+REM Command Prompt
+echo %COMSPEC%
+```
 
 ## Still Stuck?
 

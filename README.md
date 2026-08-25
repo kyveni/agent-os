@@ -483,6 +483,18 @@ $env:OPENROUTER_API_KEY="sk-..."
 agentos onboard --provider openrouter --api-key-env OPENROUTER_API_KEY
 ```
 
+**Windows Command Prompt (cmd.exe)**
+
+```cmd
+set OPENROUTER_API_KEY=sk-...
+agentos onboard --provider openrouter --api-key-env OPENROUTER_API_KEY
+```
+
+> **Windows CMD note:** `cmd.exe` does not support PowerShell
+> syntax like `$env:VAR="value"`. If you see `The filename, directory
+> name, or volume label syntax is incorrect`, use `set VAR=value`
+> instead (no quotes, no `$env:` prefix).
+
 OpenRouter is just one example — you can use any supported provider
 and its own API key variable instead.
 
