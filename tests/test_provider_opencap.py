@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from agentos.gateway.config import (
@@ -20,6 +22,7 @@ from agentos.provider.model_catalog import ModelCatalog
 from agentos.provider.openai import OpenAIProvider
 from agentos.provider.registry import ProviderSpec, get_provider_spec, list_provider_names
 from agentos.provider.selector import ProviderConfig, _build_provider
+from agentos.provider.types import ChatConfig, Message
 
 
 def test_opencap_gateway_is_registered() -> None:
@@ -293,3 +296,78 @@ def test_opencap_deepseek_v4_models_resolve_deepseek_reasoning() -> None:
         caps = catalog.get_capabilities(model, provider_name="opencap")
         assert caps.supports_reasoning is False
         assert caps.reasoning_format == "none"
+
+
+@pytest.mark.asyncio
+async def test_opencap_outbound_stream_request_includes_api_key_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = dict(request.headers)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=b'data: {"choices": [{"delta": {"content": "hello"}}]}\n\ndata: [DONE]\n\n',
+        )
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+
+    def patched_async_client(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr("agentos.provider.openai.httpx.AsyncClient", patched_async_client)
+    provider = OpenAIProvider(
+        api_key="oc_secret_key_123",
+        model="gpt-5.6-luna",
+        base_url="https://gw.capminal.ai/api/inference/v1",
+        provider_kind="opencap",
+    )
+
+    events = []
+    async for event in provider.chat([Message(role="user", content="hi")], config=ChatConfig()):
+        events.append(event)
+
+    headers = captured.get("headers", {})
+    assert headers.get("authorization") == "Bearer oc_secret_key_123"
+    assert headers.get("x-api-key") == "oc_secret_key_123"
+
+
+@pytest.mark.asyncio
+async def test_opencap_list_models_includes_api_key_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = dict(request.headers)
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "gpt-5.6-luna", "name": "GPT 5.6 Luna"}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+
+    def patched_async_client(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr("agentos.provider.openai.httpx.AsyncClient", patched_async_client)
+    provider = OpenAIProvider(
+        api_key="oc_secret_key_123",
+        model="gpt-5.6-luna",
+        base_url="https://gw.capminal.ai/api/inference/v1",
+        provider_kind="opencap",
+    )
+
+    models = await provider.list_models()
+    assert len(models) == 1
+    assert models[0].model_id == "gpt-5.6-luna"
+
+    headers = captured.get("headers", {})
+    assert headers.get("authorization") == "Bearer oc_secret_key_123"
+    assert headers.get("x-api-key") == "oc_secret_key_123"

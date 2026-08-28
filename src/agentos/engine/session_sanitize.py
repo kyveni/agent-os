@@ -254,7 +254,12 @@ def _project_historical_tool_use(
         changed = True
 
     return (
-        ContentBlockToolUse(id=block.id, name=block.name, input=projected_input),
+        ContentBlockToolUse(
+            id=block.id,
+            name=block.name,
+            input=projected_input,
+            thought_signature=block.thought_signature,
+        ),
         changed,
     )
 
