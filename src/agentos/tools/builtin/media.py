@@ -299,24 +299,47 @@ async def _fetch_image_url(url: str) -> tuple[bytes, str]:
             current_url = url
             for _redirect_count in range(_MAX_REDIRECTS + 1):
                 _check_image_url(current_url)
-                resp = await client.get(current_url)
-                if resp.status_code not in {301, 302, 303, 307, 308}:
+                # Stream the body: buffering the whole response before the size
+                # check would let one oversized URL exhaust process memory.
+                request = client.build_request("GET", current_url)
+                resp = await client.send(request, stream=True)
+                try:
+                    if resp.status_code in {301, 302, 303, 307, 308}:
+                        location = resp.headers.get("location")
+                        if not location:
+                            resp.raise_for_status()
+                            break
+                        current_url = urljoin(str(resp.url), location)
+                        continue
+                    resp.raise_for_status()
+                    # Reject early when the declared size already exceeds the
+                    # limit; a missing or lying Content-Length is caught by the
+                    # running byte counter below.
+                    content_length = resp.headers.get("content-length")
+                    if content_length is not None:
+                        try:
+                            declared_length = int(content_length)
+                        except ValueError:
+                            declared_length = 0
+                        if declared_length > _IMAGE_SIZE_LIMIT:
+                            raise ToolError("Image exceeds 20MB size limit")
+                    chunks: list[bytes] = []
+                    received = 0
+                    async for chunk in resp.aiter_bytes():
+                        received += len(chunk)
+                        if received > _IMAGE_SIZE_LIMIT:
+                            raise ToolError("Image exceeds 20MB size limit")
+                        chunks.append(chunk)
+                    image_bytes = b"".join(chunks)
                     break
-                location = resp.headers.get("location")
-                if not location:
-                    break
-                current_url = urljoin(str(resp.url), location)
+                finally:
+                    await resp.aclose()
             else:
                 raise ToolError(f"Too many redirects (>{_MAX_REDIRECTS})")
-            resp.raise_for_status()
-            image_bytes = resp.content
     except ToolError:
         raise
     except Exception as exc:
         raise ToolError(f"Failed to fetch image from URL: {exc}") from exc
-
-    if len(image_bytes) > _IMAGE_SIZE_LIMIT:
-        raise ToolError("Image exceeds 20MB size limit")
 
     # Detect format from content-type or URL extension
     content_type = resp.headers.get("content-type", "")
