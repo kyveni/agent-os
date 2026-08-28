@@ -15,6 +15,14 @@ log = structlog.get_logger(__name__)
 
 _GITHUB_HOSTS = {"github.com", "www.github.com"}
 _RAW_GITHUB_HOST = "raw.githubusercontent.com"
+
+# Download caps for blob bodies. A skill bundle is a handful of text files plus
+# the odd asset, so these ceilings sit far above any real skill and far below
+# what it takes to OOM the installer. Without them a hostile repo pointed at
+# ``fetch()`` buffers every blob of the skill directory into RAM unchecked.
+_MAX_BLOB_BYTES = 8 * 1024 * 1024  # per file
+_MAX_TOTAL_BYTES = 32 * 1024 * 1024  # whole skill directory
+_BLOB_READ_CHUNK = 64 * 1024
 _REPO_RE = re.compile(
     r"^(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)"
     r"(?:@(?P<ref>[^:]+))?(?::(?P<path>.+))?$"
@@ -108,6 +116,23 @@ def _parse_identifier(identifier: str) -> _GitHubSkillRef | None:
         match.group("ref") or "HEAD",
         _normalize_skill_path(match.group("path") or ""),
     )
+
+
+async def _read_capped(resp, limit: int) -> bytes | None:
+    """Accumulate a streamed blob body, returning ``None`` past ``limit`` bytes.
+
+    The tree API's ``size`` field is attacker-influenced metadata, so the
+    declared-size check by the caller is only a first filter; this running
+    total is what actually stops a blob that lies about how big it is.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in resp.aiter_bytes(_BLOB_READ_CHUNK):
+        total += len(chunk)
+        if total > limit:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _relative_to_skill_dir(path: str, skill_dir: str) -> str | None:
@@ -265,6 +290,7 @@ class GitHubSource(SkillSource):
                     return None
 
                 files: dict[str, str | bytes] = {}
+                budget = _MAX_TOTAL_BYTES
                 for item in tree_data.get("tree", []):
                     path = str(item.get("path") or "")
                     if item.get("type") != "blob":
@@ -272,13 +298,42 @@ class GitHubSource(SkillSource):
                     rel_path = _relative_to_skill_dir(path, ref.skill_dir)
                     if not rel_path:
                         continue
+                    # First filter on the declared size — attacker-influenced,
+                    # but cheap; the streamed running total below decides.
+                    declared = item.get("size")
+                    if isinstance(declared, int) and declared > _MAX_BLOB_BYTES:
+                        log.warning(
+                            "github.fetch_blob_declared_too_large",
+                            identifier=identifier,
+                            path=rel_path,
+                            size=declared,
+                            limit=_MAX_BLOB_BYTES,
+                        )
+                        return None
                     raw_url = (
                         f"https://raw.githubusercontent.com/{ref.repo_full}/"
                         f"{quote(ref.ref, safe='')}/{quote(path, safe='/')}"
                     )
-                    raw_resp = await client.get(raw_url, headers=self._headers())
-                    raw_resp.raise_for_status()
-                    files[rel_path] = _decode_file(rel_path, raw_resp.content)
+                    # Streamed, not buffered: a plain ``client.get`` reads the
+                    # whole body into ``response.content`` before any cap could
+                    # apply, which is exactly the OOM this guards against.
+                    async with client.stream(
+                        "GET", raw_url, headers=self._headers()
+                    ) as raw_resp:
+                        raw_resp.raise_for_status()
+                        content = await _read_capped(
+                            raw_resp, min(_MAX_BLOB_BYTES, budget)
+                        )
+                    if content is None:
+                        log.warning(
+                            "github.fetch_blob_too_large",
+                            identifier=identifier,
+                            path=rel_path,
+                            limit=_MAX_BLOB_BYTES,
+                        )
+                        return None
+                    budget -= len(content)
+                    files[rel_path] = _decode_file(rel_path, content)
         except Exception as exc:
             log.warning("github.fetch_failed", identifier=identifier, error=str(exc))
             return None
