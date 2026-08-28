@@ -15,6 +15,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.types import ASGIApp
 
 from agentos.gateway.access import is_loopback_address
+from agentos.gateway.auth import token_matches
 from agentos.gateway.config import GatewayConfig
 
 log = structlog.get_logger(__name__)
@@ -243,8 +244,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         if auth_mode == "token":
             token = self._extract_token(request)
-            configured_token = self._config.auth.token
-            if not configured_token or token != configured_token:
+            if not token_matches(token, self._config.auth.token):
                 return JSONResponse(
                     {"error": "Unauthorized", "code": "UNAUTHORIZED"}, status_code=401
                 )

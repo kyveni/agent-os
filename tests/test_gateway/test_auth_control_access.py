@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from agentos.gateway.access import ConnectionSurface
-from agentos.gateway.auth import resolve_auth
+from agentos.gateway.auth import resolve_auth, token_matches
 from agentos.gateway.config import AuthConfig, GatewayConfig
 
 
@@ -51,3 +51,31 @@ def test_token_auth_without_configured_token_fails_closed() -> None:
     config = GatewayConfig(auth=AuthConfig(mode="token", token=None))
 
     assert resolve_auth(config, {}, "control", peer_ip="127.0.0.1") is None
+
+
+class TestTokenMatches:
+    """Constant-time token comparison helper (#498)."""
+
+    def test_matching_tokens_pass(self) -> None:
+        assert token_matches("secret", "secret") is True
+
+    def test_mismatched_tokens_fail(self) -> None:
+        assert token_matches("secret", "secreX") is False
+        assert token_matches("secre", "secret") is False
+
+    def test_missing_configured_token_fails_closed(self) -> None:
+        assert token_matches("secret", None) is False
+        assert token_matches("secret", "") is False
+
+    def test_missing_or_empty_provided_token_fails(self) -> None:
+        assert token_matches(None, "secret") is False
+        assert token_matches("", "secret") is False
+
+    def test_non_string_provided_token_fails(self) -> None:
+        assert token_matches(123, "secret") is False
+        assert token_matches(b"secret", "secret") is False
+        assert token_matches(["secret"], "secret") is False
+
+    def test_utf8_tokens_compare_by_bytes(self) -> None:
+        assert token_matches("tökën", "tökën") is True
+        assert token_matches("tökën", "töken") is False

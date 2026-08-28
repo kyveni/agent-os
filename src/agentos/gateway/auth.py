@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -33,6 +34,20 @@ def denied_access(surface: ConnectionSurface = ConnectionSurface.CONTROL) -> Acc
     """Build a fail-closed context for a rejected connection."""
 
     return AccessContext(surface=surface, admitted=False, credential_verified=False)
+
+
+def token_matches(provided: object, configured: str | None) -> bool:
+    """Constant-time check of a caller-supplied token against the secret.
+
+    Fails closed on a missing/empty configured token and on any non-string or
+    missing provided value. Comparison runs on UTF-8 bytes via
+    ``hmac.compare_digest`` so response time does not reveal the secret's
+    matching prefix (#498).
+    """
+
+    if not configured or not isinstance(provided, str) or not provided:
+        return False
+    return hmac.compare_digest(provided.encode("utf-8"), configured.encode("utf-8"))
 
 
 def _surface(value: str | ConnectionSurface | None) -> ConnectionSurface:
@@ -67,8 +82,7 @@ def resolve_auth(
 
     if config.auth.mode == "token":
         provided = (auth_params or {}).get("token")
-        configured = config.auth.token
-        if not configured or provided != configured:
+        if not token_matches(provided, config.auth.token):
             log.warning("auth.failed", mode=config.auth.mode, error="invalid token")
             return None
         return AccessContext(
@@ -96,4 +110,4 @@ def resolve_auth(
     return None
 
 
-__all__ = ["AccessContext", "denied_access", "resolve_auth"]
+__all__ = ["AccessContext", "denied_access", "resolve_auth", "token_matches"]
