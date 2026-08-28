@@ -242,13 +242,20 @@ class ModelSelector:
         """
         chain = resolve_failover_chain(primary_failure, self._config, self._plugin)
         if not chain:
-            raise IndexError("No fallback chain available")
+            raise IndexError("No more provider fallbacks available")
         self._chain = [self._chain[0], *chain]
         # Same strict-advance rule as ``next_fallback``: when ``resolve()``
         # already skipped an open primary the active link is 1+, so restarting
         # the search at 1 would re-pick the link this call is failing over from.
+        start = max(1, self._index + 1)
+        if start >= len(self._chain):
+            # The chain is exhausted: the active provider is the last link and
+            # it just failed again. Raise the same clear error as
+            # ``next_fallback`` instead of leaking a bare ``IndexError`` from
+            # indexing past the end of the chain below.
+            raise IndexError("No more provider fallbacks available")
         self._admitted_index = None
-        self._index = self._first_admitted_index(max(1, self._index + 1))
+        self._index = self._first_admitted_index(start)
         return _build_provider(self._chain[self._index])
 
     def override_model(self, model: str) -> None:

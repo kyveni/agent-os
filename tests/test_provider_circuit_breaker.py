@@ -476,3 +476,52 @@ def test_failover_from_the_primary_still_starts_at_the_first_fallback() -> None:
 
     selector.next_fallback_after_failure(RuntimeError("503"))
     assert selector.active_provider_id == "deepseek"
+
+
+# ── exhausted failover chain ─────────────────────────────────────────
+
+
+def test_next_fallback_after_failure_on_a_single_provider_chain_raises_clear_error() -> None:
+    """A primary-only chain has nothing to fail over to: clear IndexError."""
+    clock = FakeClock()
+    breaker = _breaker(clock)
+    selector = ModelSelector(
+        SelectorConfig(
+            primary=ProviderConfig("openrouter", "openai/gpt-5.6-luna", api_key="k"),
+        ),
+        breaker=breaker,
+    )
+
+    selector.resolve()
+
+    with pytest.raises(IndexError, match="No more provider fallbacks available"):
+        selector.next_fallback_after_failure(RuntimeError("503"))
+
+
+def test_next_fallback_after_failure_at_the_last_link_raises_clear_error() -> None:
+    """Last link failing again must not leak a bare list-index IndexError."""
+    clock = FakeClock()
+    breaker = _breaker(clock)
+    selector = _three_link_selector(breaker)
+
+    selector.resolve()
+    selector.next_fallback_after_failure(RuntimeError("503"))
+    assert selector.active_provider_id == "deepseek"
+    selector.next_fallback_after_failure(RuntimeError("503"))
+    assert selector.active_provider_id == "anthropic"
+
+    with pytest.raises(IndexError, match="No more provider fallbacks available"):
+        selector.next_fallback_after_failure(RuntimeError("503"))
+
+
+def test_next_fallback_after_failure_from_an_early_link_still_advances() -> None:
+    """The exhaustion guard must not block a legitimate advance."""
+    clock = FakeClock()
+    breaker = _breaker(clock)
+    selector = _three_link_selector(breaker)
+
+    selector.resolve()
+    assert selector.active_provider_id == "openrouter"
+
+    selector.next_fallback_after_failure(RuntimeError("503"))
+    assert selector.active_provider_id == "deepseek"
