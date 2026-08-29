@@ -86,10 +86,14 @@ async def _run_git(*args: str, cwd: str | None = None) -> str:
             build_request_for_git(args, workspace, action_kind, policy),
             runtime=runtime,
         )
-        output = _redact_git_output(result.stdout + result.stderr)
+        output = result.stdout + result.stderr
+        redacted = redact_sensitive_text(output, force=True, code_file=False)
         if result.returncode != 0:
-            raise RuntimeError(f"git {' '.join(args)} failed (exit {result.returncode}):\n{output}")
-        return output
+            raise RuntimeError(
+                f"git {' '.join(args)} failed (exit {result.returncode}):\n"
+                f"{redacted}"
+            )
+        return redacted if redacted is not None else output
     proc = await asyncio.create_subprocess_exec(
         "git",
         *args,
@@ -98,10 +102,14 @@ async def _run_git(*args: str, cwd: str | None = None) -> str:
         cwd=cwd,
     )
     stdout, _ = await proc.communicate()
-    output = _redact_git_output(stdout.decode("utf-8", errors="replace"))
+    output = stdout.decode("utf-8", errors="replace")
+    redacted = redact_sensitive_text(output, force=True, code_file=False)
     if proc.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args)} failed (exit {proc.returncode}):\n{output}")
-    return output
+        raise RuntimeError(
+            f"git {' '.join(args)} failed (exit {proc.returncode}):\n"
+            f"{redacted if redacted is not None else output}"
+        )
+    return redacted if redacted is not None else output
 
 
 def build_request_for_git(args: tuple[str, ...], cwd: Path, action_kind: str, policy):
