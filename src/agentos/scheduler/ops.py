@@ -291,7 +291,20 @@ class SchedulerOps:
 
         if kind == ScheduleKind.AT:
             job.delete_after_run = True
-            job.next_run_at = datetime.fromisoformat(cron_expr)
+            at_dt = datetime.fromisoformat(cron_expr)
+            # An AT one-shot whose timestamp is in the past is due on the very
+            # next tick, so it would fire immediately with whatever prompt the
+            # operator typed — a stale payload running right after create is
+            # never what a one-shot is for (use EVERY/cron for that). Refuse
+            # with a small skew tolerance instead of silently scheduling a
+            # job that is already due.
+            if at_dt < now - timedelta(seconds=5):
+                raise ValueError(
+                    f"AT schedule is in the past ({cron_expr}); a one-shot job "
+                    "cannot fire `now`. Use a cron/`every` schedule for repeating "
+                    "work, or an AT timestamp in the future."
+                )
+            job.next_run_at = at_dt
         elif kind == ScheduleKind.EVERY and cron_expr.isdigit():
             # Anchor-based interval: record the anchor so subsequent fires
             # align to it rather than drifting with each run.
@@ -339,7 +352,16 @@ class SchedulerOps:
             job.delete_after_run = kind == ScheduleKind.AT
             if kind == ScheduleKind.AT:
                 job.anchor_at = None
-                job.next_run_at = datetime.fromisoformat(cron_expr)
+                at_dt = datetime.fromisoformat(cron_expr)
+                # Same past-timestamp guard as `add`: a one-shot being edited
+                # onto a past time is due on the next tick and would fire
+                # immediately with a stale payload.
+                if at_dt < now - timedelta(seconds=5):
+                    raise ValueError(
+                        f"AT schedule is in the past ({cron_expr}); a one-shot "
+                        "job cannot fire `now`."
+                    )
+                job.next_run_at = at_dt
             elif kind == ScheduleKind.EVERY:
                 job.anchor_at = now
                 job.next_run_at = now + timedelta(seconds=int(cron_expr))

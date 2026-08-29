@@ -52,6 +52,8 @@ _TRANSIENT_STATUSES: frozenset[int] = frozenset({403, 408, 425, 429, 500, 502, 5
 _RETRY_DELAY_SECONDS = 0.25
 _WEB_FETCH_DEFAULT_MAX_CHARS = 20_000
 _WEB_FETCH_MAX_CHARS_ENV = "AGENTOS_WEB_FETCH_MAX_CHARS"
+_WEB_FETCH_DOWNLOAD_LIMIT_BYTES = 1_048_576  # 1 MiB
+_WEB_FETCH_DOWNLOAD_LIMIT_ENV = "AGENTOS_WEB_FETCH_DOWNLOAD_LIMIT"
 _MAX_REDIRECTS = 5
 
 
@@ -220,7 +222,18 @@ async def web_fetch(
     status = 0
     raw_html = ""
 
-    async def _do_fetch(user_agent: str) -> tuple[int, str, str, str]:
+    def _resolve_download_limit() -> int:
+        raw = os.environ.get(_WEB_FETCH_DOWNLOAD_LIMIT_ENV, "").strip()
+        if not raw:
+            return _WEB_FETCH_DOWNLOAD_LIMIT_BYTES
+        try:
+            return max(65_536, int(raw))
+        except ValueError:
+            return _WEB_FETCH_DOWNLOAD_LIMIT_BYTES
+
+    download_limit = _resolve_download_limit()
+
+    async def _do_fetch(user_agent: str) -> tuple[int, str, str, str, bool]:
         headers = dict(_DEFAULT_HEADERS)
         headers["User-Agent"] = user_agent
         async with httpx.AsyncClient(
@@ -236,7 +249,8 @@ async def web_fetch(
                 if marker is not None:
                     raise ValueError("Blocked redirect URL containing sensitive data")
 
-                response = await client.get(current_url)
+                request = client.build_request("GET", current_url)
+                response = await client.send(request, stream=True)
                 if response.status_code not in {301, 302, 303, 307, 308}:
                     break
                 location = response.headers.get("location")
@@ -246,17 +260,30 @@ async def web_fetch(
             else:
                 raise ValueError(f"Too many redirects (>{_MAX_REDIRECTS})")
 
+            # Stream body with a hard byte ceiling to prevent OOM.
+            chunks: list[bytes] = []
+            total = 0
+            async for chunk in response.aiter_bytes():
+                remaining = download_limit - total
+                if remaining <= 0:
+                    break
+                chunks.append(chunk[:remaining])
+                total += len(chunks[-1])
+            raw_body = b"".join(chunks)
+            download_capped = total >= download_limit
+
             return (
                 response.status_code,
                 str(response.url),
                 response.headers.get("content-type", ""),
-                response.text,
+                raw_body.decode("utf-8", errors="replace"),
+                download_capped,
             )
 
     last_error: str | None = None
     for attempt_idx, user_agent in enumerate((_UA_PRIMARY, _UA_FALLBACK)):
         try:
-            status, final_url, content_type, raw_html = await _do_fetch(user_agent)
+            status, final_url, content_type, raw_html, download_capped = await _do_fetch(user_agent)
         except SSRFBlockedError:
             raise
         except httpx.TimeoutException:
@@ -275,6 +302,7 @@ async def web_fetch(
                 "extract_mode": extract_mode,
                 "extractor": "none",
                 "truncated": False,
+                "download_capped": False,
                 "length": 0,
                 "text": "",
                 "error": last_error,
@@ -299,7 +327,8 @@ async def web_fetch(
             "title": "",
             "extract_mode": extract_mode,
             "extractor": "raw",
-            "truncated": False,
+            "truncated": download_capped,
+            "download_capped": download_capped,
             "length": len(raw_html),
             "text": _wrap_content(final_url, raw_html),
         }
@@ -323,6 +352,7 @@ async def web_fetch(
             "extract_mode": extract_mode,
             "extractor": "none",
             "truncated": False,
+            "download_capped": False,
             "length": 0,
             "text": "",
             "error": hint,
@@ -374,7 +404,8 @@ async def web_fetch(
         "title": title,
         "extract_mode": extract_mode,
         "extractor": extractor_used,
-        "truncated": False,
+        "truncated": download_capped,
+        "download_capped": download_capped,
         "length": len(extracted_content),
         "text": _wrap_content(final_url, extracted_content),
     }
