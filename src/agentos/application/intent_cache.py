@@ -34,13 +34,15 @@ def _norm_path(raw: str, *, base_dir: str | Path | None = None) -> str:
     """
     if not raw or raw.startswith(("$", "`")) or raw in {"*", "-"}:
         return raw
+    # Paths starting with ``/`` (like ``/*``, ``/``, ``/.``) are root
+    # references on POSIX.  On Windows they are ambiguous (no drive letter)
+    # and Path.resolve() will incorrectly join them with the CWD, making
+    # the root-sensitive-path hard block unreachable.  Return them as-is.
+    if raw.lstrip().startswith("/"):
+        return raw
     try:
         path = Path(raw).expanduser()
-        # On Windows, ``/*`` is not absolute (no drive letter), but it is a
-        # valid root reference that should not be joined with the CWD — that
-        # would turn ``rm -rf /*`` into a resolved Windows path that bypasses
-        # the root-sensitive-path hard block.
-        if base_dir is not None and not path.is_absolute() and not raw.startswith("/"):
+        if base_dir is not None and not path.is_absolute():
             path = Path(base_dir).expanduser() / path
         return str(path.resolve(strict=False))
     except (OSError, ValueError):
