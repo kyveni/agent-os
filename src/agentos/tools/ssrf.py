@@ -8,6 +8,9 @@ from collections.abc import Iterable
 from typing import Any
 from urllib.parse import urlparse
 
+import httpcore
+import httpx
+
 from agentos.tools.types import SSRFBlockedError, UnsupportedURLSchemeError
 
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
@@ -297,8 +300,6 @@ class ValidatingNetworkBackend:
         self,
         trusted_fake_ip_cidrs: Iterable[str] | None = None,
     ) -> None:
-        import httpcore
-
         self._backend = httpcore.AsyncConnectionPool()
         self._trusted_fake_ip_cidrs = list(trusted_fake_ip_cidrs) if trusted_fake_ip_cidrs else None
 
@@ -374,8 +375,6 @@ async def ssrf_guarded_client(
 
     All other httpx defaults (env-proxy mounts, etc.) are preserved.
     """
-    import httpx
-
     backend = ValidatingNetworkBackend(trusted_fake_ip_cidrs=trusted_fake_ip_cidrs)
     mounts = {
         "all://": httpx.AsyncHTTPTransport(backend=backend),
