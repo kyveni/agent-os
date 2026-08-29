@@ -141,10 +141,17 @@ def is_sensitive_path(path: str) -> str | None:
         return None
 
     # Block bare root targets: ``/``, ``/.``, ``/*``, and empty-after-strip variants.
+    # On Windows, drive-letter roots like ``C:\`` are also covered.
     # ``rm -rf /`` is the most destructive command — never allow it without
     # the explicit /elevated full escape hatch.
-    stripped = path.strip()
-    if stripped in ("/", "/.", "/*", "/ *") or stripped.rstrip("/") == "":
+    stripped = path.strip().replace("\\", "/")
+    if stripped in ("/", "/.", "/*", "/ *"):
+        return "/"
+    # Cross-platform: strip drive letter and check for empty/root tail.
+    # On Windows, Path("/").resolve() may produce a drive-letter root like
+    # ``C:\``, and ``_norm_path`` in the intent layer will pass it through.
+    _drive, tail = os.path.splitdrive(stripped)
+    if tail.strip("/\\") == "":
         return "/"
 
     candidates = _comparison_path_candidates(path)
