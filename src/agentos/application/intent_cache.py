@@ -36,7 +36,11 @@ def _norm_path(raw: str, *, base_dir: str | Path | None = None) -> str:
         return raw
     try:
         path = Path(raw).expanduser()
-        if base_dir is not None and not path.is_absolute():
+        # On Windows, ``/*`` is not absolute (no drive letter), but it is a
+        # valid root reference that should not be joined with the CWD — that
+        # would turn ``rm -rf /*`` into a resolved Windows path that bypasses
+        # the root-sensitive-path hard block.
+        if base_dir is not None and not path.is_absolute() and not raw.startswith("/"):
             path = Path(base_dir).expanduser() / path
         return str(path.resolve(strict=False))
     except (OSError, ValueError):
