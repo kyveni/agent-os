@@ -481,6 +481,23 @@ copyleft requirement and no restriction on commercial use. This notice, together
 with the ODC-BY reference above, provides that attribution for the checked-in
 WildChat-derived golden-set rows.
 
+## Partner brand assets (UI logos)
+
+- Component: `frontend/src/assets/base-symbol.png` — Base (Coinbase) logo
+- Upstream: https://base.org/brand-kit
+- Usage: visual identifier for the Base MCP partner card in the AgentOS Web UI
+- License: The Base logo is a trademark of Coinbase. Its use in this project
+  is limited to identifying the Base MCP partner integration. AgentOS does not
+  claim ownership of the mark.
+
+- Component: `frontend/src/assets/robinhood-symbol.png` — Robinhood logo
+- Upstream: https://robinhood.com/us/en/support/articles/brand-assets/
+- Usage: visual identifier for the Robinhood MCP partner card in the AgentOS
+  Web UI
+- License: The Robinhood logo is a trademark of Robinhood Markets, Inc. Its
+  use in this project is limited to identifying the Robinhood MCP partner
+  integration. AgentOS does not claim ownership of the mark.
+
 ## React Control UI production dependencies
 
 The browser bundle is built from the lockfile-pinned packages below. The

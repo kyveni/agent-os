@@ -29,6 +29,32 @@ Base also documents a set of native plugins (for example Uniswap, Aerodrome,
 Morpho, and OpenSea). The live authenticated MCP schemas are authoritative for
 tool names and parameters.
 
+## OAuth integration status
+
+Base MCP uses OAuth 2.1 (Authorization Code + PKCE) for user authentication.
+The integration has been verified against the live endpoint at
+`https://mcp.base.org`:
+
+- **Endpoint**: `GET /` returns `401` without a bearer token, confirming that
+  OAuth is required.
+- **Authorization server metadata**: `/.well-known/oauth-authorization-server`
+  returns valid RFC 8414 metadata with PKCE (`S256`), authorization code, and
+  refresh token support.
+- **Dynamic client registration**: the metadata advertises
+  `registration_endpoint` at `https://mcp.base.org/register`; scopes include
+  `agent_wallet:transact` and `agent_wallet:escalate`.
+- **AgentOS compatibility**: the MCP Streamable HTTP client (`MCPStreamableHTTPClient`)
+  uses the MCP SDK's `OAuthClientProvider` which discovers the authorization-server
+  metadata automatically and registers the client dynamically. The same code path
+  is exercised against the Robinhood MCP integration in production.
+
+> **Note**: A full end-to-end smoke test (registration → authorization →
+> token exchange → tool discovery) requires a real Base Account. The metadata
+> above confirms that Base MCP speaks the same protocol and OAuth dialect as
+> Robinhood, and the well-known endpoints exercise the same `FileOAuthStorage`
+> and `OAuthClientProvider` paths covered by the existing gateway and MCP boot
+> tests.
+
 ## Safety model
 
 Every write action requires explicit user approval inside the Base Account —
