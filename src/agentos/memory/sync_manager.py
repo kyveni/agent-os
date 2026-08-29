@@ -167,9 +167,7 @@ class MemorySyncManager:
             deletes = set(self._pending_deletes)
             self._pending_changes.clear()
             self._pending_deletes.clear()
-            failed_deletes = await self._do_file_sync(
-                changes=changes, deletes=deletes
-            )
+            failed_deletes = await self._do_file_sync(changes=changes, deletes=deletes)
         else:
             failed_deletes = await self._do_file_sync(force=force)
 
@@ -233,6 +231,26 @@ class MemorySyncManager:
                     if not is_memory_source_path(rel):
                         continue
                     result[rel] = path.stat().st_mtime
+        kb_dir = self._workspace_dir / "knowledge_base"
+        if kb_dir.is_dir():
+            from .ingest import MAX_DOCUMENT_SIZE_BYTES, SUPPORTED_EXTENSIONS
+
+            for path in kb_dir.rglob("*"):
+                if path.is_file():
+                    rel_to_kb = path.relative_to(kb_dir)
+                    if any(part.startswith(".") for part in rel_to_kb.parts):
+                        continue
+                    suffix = path.suffix.lower()
+                    if suffix not in SUPPORTED_EXTENSIONS and suffix != "":
+                        continue
+                    try:
+                        stat = path.stat()
+                        if stat.st_size > MAX_DOCUMENT_SIZE_BYTES:
+                            continue
+                        rel = path.relative_to(self._workspace_dir).as_posix()
+                        result[rel] = stat.st_mtime
+                    except OSError:
+                        continue
         return result
 
     async def _do_file_sync(
@@ -280,14 +298,30 @@ class MemorySyncManager:
             if not abs_path.is_file():
                 continue
             try:
-                content = abs_path.read_text(encoding="utf-8", errors="replace")
+                is_kb = rel_path.startswith("knowledge_base/") or rel_path.startswith(
+                    "knowledge_base\\"
+                )
+                if is_kb:
+                    from .ingest import extract_document_text
+
+                    content = extract_document_text(abs_path)
+                    source = MemorySource.knowledge_base
+                else:
+                    content = abs_path.read_text(encoding="utf-8", errors="replace")
+                    source = MemorySource.memory
+
                 n = await self._store.index_file(
                     path=rel_path,
                     content=content,
-                    source=MemorySource.memory,
+                    source=source,
                 )
                 if n > 0:
-                    logger.info("sync_manager.indexed", path=rel_path, chunks=n)
+                    logger.info(
+                        "sync_manager.indexed",
+                        path=rel_path,
+                        chunks=n,
+                        source=source.value,
+                    )
             except Exception:
                 logger.warning("sync_manager.index_failed", path=rel_path)
 
@@ -301,12 +335,17 @@ class MemorySyncManager:
         """
         if self._session_indexer is None:
             return False
-        should_sync = force or reason in {
-            "initial",
-            "manual",
-            "session-start",
-            "session-delta",
-        } or reason.startswith("search:")
+        should_sync = (
+            force
+            or reason
+            in {
+                "initial",
+                "manual",
+                "session-start",
+                "session-delta",
+            }
+            or reason.startswith("search:")
+        )
         if not should_sync:
             return False
         try:

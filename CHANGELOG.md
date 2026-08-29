@@ -4,6 +4,8 @@ All notable changes to AgentOS will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
 ## [2026.8.28] - 2026-08-28
 
 ### Added
@@ -24,6 +26,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   transcripts. Existing databases migrate automatically (V011); old sessions
   come up project-less, and deleting a project detaches its sessions instead
   of deleting them.
+
+### Fixed
+
+- Cron: day-of-week `7` is Sunday again, so `0 0 * * 7` schedules Sundays
+  instead of being rejected (#478).
+- Cron: a reversed range in a stepped field (`30-20/5`) is refused up front
+  with a clear error instead of parsing into surprise fire times (#480).
+- Cron: month and day-of-week names are case-insensitive — `jan`, `JAN` and
+  `Jan` are the same month, `sun`/`SUN` the same day (#482).
+- Scheduler: the timezone alias on a legacy expression schedule is honored
+  instead of silently falling back (#485).
 
 ## [2026.8.27] - 2026-08-27
 
