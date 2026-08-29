@@ -15,6 +15,10 @@ log = structlog.get_logger(__name__)
 
 _GITHUB_HOSTS = {"github.com", "www.github.com"}
 _RAW_GITHUB_HOST = "raw.githubusercontent.com"
+#: Per-blob download ceiling — 8 MiB covers every reasonable skill file.
+_MAX_BLOB_BYTES = 8 * 1024 * 1024
+#: Cumulative total budget for all blobs in a single skill fetch.
+_MAX_TOTAL_BYTES = 32 * 1024 * 1024
 _REPO_RE = re.compile(
     r"^(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)"
     r"(?:@(?P<ref>[^:]+))?(?::(?P<path>.+))?$"
@@ -276,9 +280,44 @@ class GitHubSource(SkillSource):
                         f"https://raw.githubusercontent.com/{ref.repo_full}/"
                         f"{quote(ref.ref, safe='')}/{quote(path, safe='/')}"
                     )
-                    raw_resp = await client.get(raw_url, headers=self._headers())
-                    raw_resp.raise_for_status()
-                    files[rel_path] = _decode_file(rel_path, raw_resp.content)
+                    blob_request = client.build_request("GET", raw_url)
+                    raw_resp = await client.send(blob_request, stream=True)
+                    try:
+                        raw_resp.raise_for_status()
+                        chunks: list[bytes] = []
+                        total = 0
+                        async for chunk in raw_resp.aiter_bytes():
+                            remaining = _MAX_BLOB_BYTES - total
+                            if remaining <= 0:
+                                break
+                            chunks.append(chunk[:remaining])
+                            total += len(chunks[-1])
+                        raw_content = b"".join(chunks)
+                        if total >= _MAX_BLOB_BYTES:
+                            log.warning(
+                                "github.blob_exceeded_per_blob_cap",
+                                path=path,
+                                bytes=total,
+                                cap=_MAX_BLOB_BYTES,
+                            )
+                            continue
+                    finally:
+                        await raw_resp.aclose()
+
+                    # Check cumulative total budget
+                    cumulative = sum(
+                        len(v) if isinstance(v, bytes) else len(v.encode("utf-8"))
+                        for v in files.values()
+                    )
+                    if cumulative + len(raw_content) > _MAX_TOTAL_BYTES:
+                        log.warning(
+                            "github.total_exceeded_cumulative_budget",
+                            bytes=cumulative + len(raw_content),
+                            cap=_MAX_TOTAL_BYTES,
+                        )
+                        continue
+
+                    files[rel_path] = _decode_file(rel_path, raw_content)
         except Exception as exc:
             log.warning("github.fetch_failed", identifier=identifier, error=str(exc))
             return None
