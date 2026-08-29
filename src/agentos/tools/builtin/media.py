@@ -299,7 +299,8 @@ async def _fetch_image_url(url: str) -> tuple[bytes, str]:
             current_url = url
             for _redirect_count in range(_MAX_REDIRECTS + 1):
                 _check_image_url(current_url)
-                resp = await client.get(current_url)
+                request = client.build_request("GET", current_url)
+                resp = await client.send(request, stream=True)
                 if resp.status_code not in {301, 302, 303, 307, 308}:
                     break
                 location = resp.headers.get("location")
@@ -309,13 +310,23 @@ async def _fetch_image_url(url: str) -> tuple[bytes, str]:
             else:
                 raise ToolError(f"Too many redirects (>{_MAX_REDIRECTS})")
             resp.raise_for_status()
-            image_bytes = resp.content
+            # Stream body with a hard ceiling at _IMAGE_SIZE_LIMIT (20 MB)
+            # to prevent OOM on oversized responses.
+            chunks: list[bytes] = []
+            total = 0
+            async for chunk in resp.aiter_bytes():
+                remaining = _IMAGE_SIZE_LIMIT - total
+                if remaining <= 0:
+                    break
+                chunks.append(chunk[:remaining])
+                total += len(chunks[-1])
+            image_bytes = b"".join(chunks)
     except ToolError:
         raise
     except Exception as exc:
         raise ToolError(f"Failed to fetch image from URL: {exc}") from exc
 
-    if len(image_bytes) > _IMAGE_SIZE_LIMIT:
+    if total > _IMAGE_SIZE_LIMIT or len(image_bytes) > _IMAGE_SIZE_LIMIT:
         raise ToolError("Image exceeds 20MB size limit")
 
     # Detect format from content-type or URL extension
