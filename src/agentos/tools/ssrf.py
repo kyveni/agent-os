@@ -236,7 +236,7 @@ def resolve_and_validate(
     port: int,
     *,
     trusted_fake_ip_cidrs: Iterable[str] | None = None,
-) -> list[tuple[str, int, str, int]]:
+) -> list[tuple[str, int]]:
     """Resolve *hostname* and validate every resolved address.
 
     Returns a list of ``(family, type, proto, sockaddr)`` tuples compatible
@@ -257,15 +257,17 @@ def resolve_and_validate(
         else _trusted_fake_ip_cidrs
     )
 
-    validated: list[tuple[int, int, int, str, int]] = []
+    validated: list[tuple[str, int]] = []
     for info in infos:
         family, socktype, proto, _canonname, sockaddr = info
-        addr = ipaddress.ip_address(sockaddr[0])
+        sockaddr_host: str = sockaddr[0]  # type: ignore[assignment]
+        sockaddr_port: int = sockaddr[1]  # type: ignore[assignment]
+        addr = ipaddress.ip_address(sockaddr_host)
         block_reason = _hard_block_reason(addr)
         if block_reason is not None:
             raise SSRFBlockedError(_blocked_message(hostname, addr, block_reason))
         if _is_trusted_fake_ip(addr, trusted_networks):
-            validated.append((family, socktype, proto, sockaddr[0], sockaddr[1]))
+            validated.append((sockaddr_host, sockaddr_port))
             continue
         if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
             reason = (
@@ -275,32 +277,39 @@ def resolve_and_validate(
                 else "private/internal range"
             )
             raise SSRFBlockedError(_blocked_message(hostname, addr, reason))
-        validated.append((family, socktype, proto, sockaddr[0], sockaddr[1]))
+        validated.append((sockaddr_host, sockaddr_port))
 
-    return [
-        (family, socktype, proto, (str_addr, port))
-        for family, socktype, proto, str_addr, _port in validated
-    ]
+    return validated
 
 
 class ValidatingNetworkBackend:
     """httpcore network backend that resolves and validates at connect time.
 
-    Wraps the default backend but intercepts connection setup to resolve the
-    hostname and validate every resolved address against SSRF rules *before*
-    connecting. This eliminates the DNS-rebinding TOCTOU: the address the
-    guard validates IS the address the socket connects to.
+    Implements :class:`httpcore.AsyncNetworkBackend` — the low-level
+    interface that ``httpcore`` calls when it needs to open a TCP
+    connection. Intercepts ``connect_tcp`` to resolve the hostname and
+    validate every resolved address against SSRF rules *before* connecting.
+    This eliminates the DNS-rebinding TOCTOU: the address the guard
+    validates IS the address the socket connects to.
 
     TLS is unaffected: httpcore still performs the handshake against the
     origin hostname (SNI + certificate verification); only the TCP endpoint
     is pinned to the validated address.
+
+    Usage::
+
+        backend = ValidatingNetworkBackend()
+        pool = httpcore.AsyncConnectionPool(network_backend=backend)
+        transport = httpx.AsyncHTTPTransport()
+        transport._pool = pool
+        client = httpx.AsyncClient(transport=transport)
     """
 
     def __init__(
         self,
         trusted_fake_ip_cidrs: Iterable[str] | None = None,
     ) -> None:
-        self._backend = httpcore.AsyncConnectionPool()
+        self._inner = httpcore.AnyIOBackend()
         self._trusted_fake_ip_cidrs = list(trusted_fake_ip_cidrs) if trusted_fake_ip_cidrs else None
 
     async def connect_tcp(
@@ -309,8 +318,8 @@ class ValidatingNetworkBackend:
         port: int,
         timeout: float | None = None,
         local_address: str | None = None,
-        socket_options: int | None = None,
-    ) -> httpcore.AsyncConnectionInterface:
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
         # Resolve and validate the hostname at connect time, pinning the
         # validated address. This is the same logic as the guard but happens
         # inside the connection setup — no second resolution.
@@ -322,14 +331,12 @@ class ValidatingNetworkBackend:
         if not validated:
             raise SSRFBlockedError(f"No valid addresses for {host}")
 
-        # Take the first validated address family.
-        family, socktype, proto, address = validated[0]
-        resolved_host, resolved_port = address
+        # Take the first validated address.
+        resolved_host, resolved_port = validated[0]
 
-        # Delegate to the default backend with the IP literal, not the
-        # hostname. httpcore handles TLS SNI from the original hostname
-        # separately.
-        return await self._backend.connect_tcp(
+        # Delegate to AnyIOBackend with the IP literal, not the hostname.
+        # httpcore handles TLS SNI from the original hostname separately.
+        return await self._inner.connect_tcp(
             host=resolved_host,
             port=resolved_port,
             timeout=timeout,
@@ -341,22 +348,16 @@ class ValidatingNetworkBackend:
         self,
         path: str,
         timeout: float | None = None,
-        socket_options: int | None = None,
-    ) -> httpcore.AsyncConnectionInterface:
-        return await self._backend.connect_unix_socket(
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        return await self._inner.connect_unix_socket(
             path=path,
             timeout=timeout,
             socket_options=socket_options,
         )
 
-    async def close(self) -> None:
-        await self._backend.close()
-
-    async def __aenter__(self) -> ValidatingNetworkBackend:
-        return self
-
-    async def __aexit__(self, *args: object) -> None:
-        await self.close()
+    async def sleep(self, seconds: float) -> None:
+        return await self._inner.sleep(seconds)
 
 
 async def ssrf_guarded_client(
@@ -369,19 +370,20 @@ async def ssrf_guarded_client(
     """Build an :class:`httpx.AsyncClient` whose connections are
     SSRF-guarded at connect time, eliminating the DNS-rebinding TOCTOU.
 
-    The returned client uses :class:`ValidatingNetworkBackend` so every
+    The returned client uses :class:`ValidatingNetworkBackend` as the
+    network backend inside the ``httpcore`` connection pool, so every
     hostname is resolved and validated inside the connection setup, not
     in a separate guard call that httpx then re-resolves.
 
     All other httpx defaults (env-proxy mounts, etc.) are preserved.
     """
     backend = ValidatingNetworkBackend(trusted_fake_ip_cidrs=trusted_fake_ip_cidrs)
-    mounts = {
-        "all://": httpx.AsyncHTTPTransport(backend=backend),
-    }
+    pool = httpcore.AsyncConnectionPool(network_backend=backend)  # type: ignore[arg-type]
+    transport = httpx.AsyncHTTPTransport()
+    transport._pool = pool  # type: ignore[attr-defined]
     return httpx.AsyncClient(
+        transport=transport,
         timeout=timeout,
         follow_redirects=follow_redirects,
-        mounts=mounts,
         **kwargs,
     )
