@@ -260,6 +260,9 @@ def sensitive_path_marker(
     marker = is_sensitive_path(path)
     if marker is None:
         return None
+    # Root marker ("/") is absolute — never soften it with workspace exceptions.
+    if marker == "/":
+        return marker
     if _workspace_contains(path, workspace) and _workspace_nested_under_marker(
         workspace, marker
     ):
