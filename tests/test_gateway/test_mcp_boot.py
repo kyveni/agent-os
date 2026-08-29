@@ -12,7 +12,6 @@ from agentos.gateway.config import GatewayConfig
 from agentos.mcp.streamable_http import FileOAuthStorage
 from agentos.tools.registry import ToolRegistry
 
-
 FIXTURE_DIR = Path(__file__).resolve().parent.parent / "test_data"
 
 
