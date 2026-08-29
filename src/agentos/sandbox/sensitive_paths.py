@@ -139,6 +139,14 @@ def is_sensitive_path(path: str) -> str | None:
         return None
     if not path:
         return None
+
+    # Block bare root targets: ``/``, ``/.``, ``/*``, and empty-after-strip variants.
+    # ``rm -rf /`` is the most destructive command — never allow it without
+    # the explicit /elevated full escape hatch.
+    stripped = path.strip()
+    if stripped in ("/", "/.", "/*", "/ *") or stripped.rstrip("/") == "":
+        return "/"
+
     candidates = _comparison_path_candidates(path)
     for expanded in candidates:
         if (
