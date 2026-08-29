@@ -88,8 +88,11 @@ async def _run_git(*args: str, cwd: str | None = None) -> str:
         )
         output = _redact_git_output(result.stdout + result.stderr)
         if result.returncode != 0:
-            raise RuntimeError(f"git {' '.join(args)} failed (exit {result.returncode}):\n{output}")
-        return output
+            raise RuntimeError(
+                f"git {' '.join(args)} failed (exit {result.returncode}):\n"
+                f"{redact_sensitive_text(output, force=True, code_file=False)}"
+            )
+        return redact_sensitive_text(output, force=True, code_file=False)
     proc = await asyncio.create_subprocess_exec(
         "git",
         *args,
@@ -100,8 +103,11 @@ async def _run_git(*args: str, cwd: str | None = None) -> str:
     stdout, _ = await proc.communicate()
     output = _redact_git_output(stdout.decode("utf-8", errors="replace"))
     if proc.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args)} failed (exit {proc.returncode}):\n{output}")
-    return output
+        raise RuntimeError(
+            f"git {' '.join(args)} failed (exit {proc.returncode}):\n"
+            f"{redact_sensitive_text(output, force=True, code_file=False)}"
+        )
+    return redact_sensitive_text(output, force=True, code_file=False)
 
 
 def build_request_for_git(args: tuple[str, ...], cwd: Path, action_kind: str, policy):
