@@ -28,6 +28,7 @@ from agentos.onboarding.audio_specs import get_audio_provider_setup_spec
 from agentos.onboarding.image_generation_specs import (
     get_image_generation_provider_setup_spec,
 )
+from agentos.tools.ssrf import assert_not_metadata_endpoint
 from agentos.onboarding.provider_specs import get_provider_setup_spec
 from agentos.onboarding.redaction import (
     redact_audio_payload,
@@ -398,6 +399,49 @@ def _merge_router_tiers(
     return merged
 
 
+def _validate_provider_base_url(base_url: str) -> None:
+    """Validate a caller-supplied LLM provider base_url.
+
+    Requires http(s) scheme, rejects non-network schemes, cloud metadata
+    endpoints, and private/internal IPs (loopback/localhost is allowed for
+    local models like Ollama). DNS-resolution is not performed here — that
+    is a separate concern handled by the SSRF guard at connect time.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(
+            "provider base_url must be an absolute http(s) URL "
+            f"(e.g. http://localhost:11434/v1), got {base_url!r}"
+        )
+
+    hostname = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not hostname:
+        raise ValueError(f"provider base_url has no hostname: {base_url!r}")
+
+    # Cloud metadata check — blocks 169.254.169.254 and metadata.google.internal
+    assert_not_metadata_endpoint(base_url)
+
+    try:
+        import ipaddress
+
+        literal = ipaddress.ip_address(hostname.strip("[]"))
+    except ValueError:
+        # Hostname, not a literal IP — skip private-IP validation (DNS
+        # rebinding is handled at connect time, not here).
+        return
+
+    if literal.is_loopback:
+        return
+    if literal.is_private or literal.is_link_local or literal.is_reserved:
+        raise ValueError(
+            f"provider base_url resolves to {hostname}, which is a "
+            "private/internal address. Only localhost (127.0.0.1) is "
+            "allowed for local providers."
+        )
+
+
 def _validate_judge_base_url(base_url: str) -> None:
     """Validate the *shape* of a local judge endpoint URL.
 
@@ -536,6 +580,10 @@ def upsert_llm_provider(
     effective_base_url = base_url or saved_base_url or spec.default_base_url
     if spec.requires_base_url and not effective_base_url:
         raise ValueError(f"provider {provider_id!r} requires a base_url")
+    # Validate only the caller-supplied base_url — saved/default URLs from
+    # trusted config are not re-validated (they were validated when first set).
+    if base_url:
+        _validate_provider_base_url(base_url)
     saved_proxy = (
         saved_profile.proxy
         if saved_profile is not None
