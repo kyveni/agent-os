@@ -112,6 +112,21 @@ def _looks_like_rooted_path_text(path: str) -> bool:
     return normalized.startswith(("/", "~/")) and not normalized.startswith("//")
 
 
+def _is_root_target(text: str) -> bool:
+    """Return True if *text* resolves to a bare root target.
+
+    On Windows, ``Path("/*").is_absolute()`` is ``False`` (no drive
+    letter), so the normal ``is_sensitive_path`` guard in
+    :func:`sensitive_path_marker` is bypassed entirely.  This helper
+    catches the same pattern after path normalization.
+    """
+    stripped = text.strip().replace("\\", "/")
+    if stripped in ("/", "/.", "/*"):
+        return True
+    _drive, tail = os.path.splitdrive(stripped)
+    return tail.strip("/\\") == ""
+
+
 def _path_name(path: str) -> str:
     normalized = str(path).strip().replace("\\", "/").rstrip("/")
     return PurePosixPath(normalized).name.lower()
@@ -256,6 +271,11 @@ def sensitive_path_marker(
         and not _looks_like_rooted_path_text(text)
     ):
         return _sensitive_leaf_marker(text)
+
+    # Re-check root-like targets after path normalization may have stripped
+    # the leading ``/`` on Windows (where ``/*`` is not absolute).
+    if _is_root_target(text):
+        return "/"
 
     marker = is_sensitive_path(path)
     if marker is None:
