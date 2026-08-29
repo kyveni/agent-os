@@ -53,8 +53,17 @@ def _sensitive_body_marker(body: str | None) -> str | None:
 
 def _sensitive_url_marker(url: str) -> str | None:
     parsed = urlparse(url)
+    # Check userinfo (username and password) — percent-decoded, since httpx
+    # decodes them before sending as Authorization: Basic header.
+    from urllib.parse import unquote
+
+    if parsed.username and secret_literal_marker(unquote(parsed.username)) is not None:
+        return "sensitive_url_userinfo"
+    if parsed.password and secret_literal_marker(unquote(parsed.password)) is not None:
+        return "sensitive_url_userinfo"
+    # Check path segments — percent-decoded for consistency.
     for segment in parsed.path.split("/"):
-        if secret_literal_marker(segment) is not None:
+        if secret_literal_marker(unquote(segment)) is not None:
             return "sensitive_url_path"
     if not parsed.query:
         return None
@@ -212,23 +221,40 @@ async def http_request(
     content: bytes | None = body.encode() if body else None
 
     async with httpx.AsyncClient(timeout=timeout, trust_env=_trust_env()) as client:
-        response = await client.request(
+        request = client.build_request(
             method=method_upper,
             url=url,
             headers=headers or {},
             content=content,
         )
+        response = await client.send(request, stream=True)
 
     content_type = response.headers.get("content-type", "")
     is_text = _is_text_response_content_type(content_type)
-    raw_body = response.content
+
+    # Stream body with a hard byte ceiling to prevent OOM on oversized
+    # responses. The byte ceiling is the display cap (1 MB) — we don't need
+    # more than that in memory regardless of the output path.
+    _HARD_BYTE_CEILING = _BINARY_BODY_LIMIT
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in response.aiter_bytes():
+        remaining = _HARD_BYTE_CEILING - total
+        if remaining <= 0:
+            break
+        chunks.append(chunk[:remaining])
+        total += len(chunks[-1])
+    raw_body = b"".join(chunks)
+    download_capped = total >= _HARD_BYTE_CEILING
+
     should_save = output_path is not None
     from agentos.safety.injection_guard import wrap_untrusted_boundary
 
     if should_save:
         saved_path, digest = _save_http_response_body(raw_body, output_path)
+        text_decoded = raw_body.decode("utf-8", errors="replace")
         preview = (
-            wrap_untrusted_boundary(response.text[:_TEXT_BODY_LIMIT], str(response.url))
+            wrap_untrusted_boundary(text_decoded[:_TEXT_BODY_LIMIT], str(response.url))
             if is_text
             else None
         )
@@ -245,18 +271,19 @@ async def http_request(
             "body_omitted_reason": "saved_to_file",
             "body_preview": preview,
             "path": str(saved_path),
-            "size": len(raw_body),
+            "size": total,
             "sha256": digest,
+            "download_capped": download_capped,
         }
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     capped = raw_body[:_BINARY_BODY_LIMIT]
     body_base64 = base64.b64encode(capped).decode("ascii")
-    body_base64_truncated = len(raw_body) > _BINARY_BODY_LIMIT
+    body_base64_truncated = download_capped or len(raw_body) > _BINARY_BODY_LIMIT
     if is_text:
-        text_body = response.text
-        body = wrap_untrusted_boundary(text_body[:_TEXT_BODY_LIMIT], str(response.url))
-        body_truncated = len(text_body) > _TEXT_BODY_LIMIT
+        text_decoded = raw_body.decode("utf-8", errors="replace")
+        body = wrap_untrusted_boundary(text_decoded[:_TEXT_BODY_LIMIT], str(response.url))
+        body_truncated = len(text_decoded) > _TEXT_BODY_LIMIT or download_capped
     else:
         body = None
         body_truncated = False
@@ -272,8 +299,9 @@ async def http_request(
         "body_base64_truncated": body_base64_truncated,
         "body_saved": False,
         "path": None,
-        "size": len(raw_body),
+        "size": total,
         "sha256": hashlib.sha256(raw_body).hexdigest(),
+        "download_capped": download_capped,
     }
     return json.dumps(result, ensure_ascii=False, indent=2)
 

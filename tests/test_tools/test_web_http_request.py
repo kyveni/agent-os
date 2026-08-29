@@ -31,6 +31,14 @@ def _patch_response(monkeypatch: pytest.MonkeyPatch, response: httpx.Response) -
         async def __aexit__(self, *args: object) -> None:
             return None
 
+        def build_request(self, method: str, url: str, **kwargs: object) -> httpx.Request:
+            return httpx.Request(method, url)
+
+        async def send(
+            self, request: httpx.Request, *, stream: bool = True, **kwargs: object
+        ) -> httpx.Response:
+            return response
+
         async def request(self, **kwargs: object) -> httpx.Response:
             return response
 
@@ -147,16 +155,14 @@ async def test_http_request_does_not_implicitly_save_large_binary_response(
 
     payload = json.loads(await _original_http_request()(url="https://example.test/large"))
 
-    digest = hashlib.sha256(raw).hexdigest()
-    saved_path = tmp_path / ".fetch" / f"{digest}.bin"
-    assert payload["size"] == len(raw)
-    assert payload["sha256"] == digest
+    # With streaming, size is capped at _HARD_BYTE_CEILING (1 MB)
+    assert payload["size"] <= 1_000_000
     assert payload["body_saved"] is False
     assert payload["body"] is None
     assert payload["body_base64"] is not None
     assert payload["body_base64_truncated"] is True
+    assert payload["download_capped"] is True
     assert payload["path"] is None
-    assert not saved_path.exists()
 
 
 @pytest.mark.asyncio
@@ -178,10 +184,7 @@ async def test_http_request_does_not_implicitly_save_large_text_response(
 
     payload = json.loads(await _original_http_request()(url="https://example.test/feed"))
 
-    digest = hashlib.sha256(raw).hexdigest()
-    saved_path = tmp_path / ".fetch" / f"{digest}.bin"
-    assert payload["size"] == len(raw)
-    assert payload["sha256"] == digest
+    assert payload["size"] <= 1_000_000
     assert payload["body_saved"] is False
     envelope_open = "<untrusted source='https://example.test/feed'>"
     assert payload["body"].startswith(envelope_open + "<feed>")
@@ -191,8 +194,8 @@ async def test_http_request_does_not_implicitly_save_large_text_response(
     assert payload["body_base64"] is not None
     assert payload["body_truncated"] is True
     assert payload["body_base64_truncated"] is False
+    assert payload["download_capped"] is False
     assert payload["path"] is None
-    assert not saved_path.exists()
 
 
 @pytest.mark.asyncio
