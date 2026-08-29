@@ -51,6 +51,12 @@ def ok_response(monkeypatch: pytest.MonkeyPatch) -> None:
         async def __aexit__(self, *args: object) -> None:
             return None
 
+        def build_request(self, method: str, url: str, **kwargs: object) -> str:
+            return url
+
+        async def send(self, request: str, **kwargs: object) -> httpx.Response:
+            return response
+
         async def request(self, **kwargs: object) -> httpx.Response:
             return response
 
