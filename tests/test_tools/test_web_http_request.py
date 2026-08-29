@@ -31,6 +31,12 @@ def _patch_response(monkeypatch: pytest.MonkeyPatch, response: httpx.Response) -
         async def __aexit__(self, *args: object) -> None:
             return None
 
+        def build_request(self, method: str, url: str, **kwargs: object) -> str:
+            return url
+
+        async def send(self, request: str, **kwargs: object) -> httpx.Response:
+            return response
+
         async def request(self, **kwargs: object) -> httpx.Response:
             return response
 
@@ -147,14 +153,17 @@ async def test_http_request_does_not_implicitly_save_large_binary_response(
 
     payload = json.loads(await _original_http_request()(url="https://example.test/large"))
 
-    digest = hashlib.sha256(raw).hexdigest()
+    # With streaming, the body is capped at _BINARY_BODY_LIMIT (1 MB).
+    capped = raw[:1_000_000]
+    digest = hashlib.sha256(capped).hexdigest()
     saved_path = tmp_path / ".fetch" / f"{digest}.bin"
-    assert payload["size"] == len(raw)
+    assert payload["size"] == 1_000_000
     assert payload["sha256"] == digest
     assert payload["body_saved"] is False
     assert payload["body"] is None
     assert payload["body_base64"] is not None
     assert payload["body_base64_truncated"] is True
+    assert payload["download_capped"] is True
     assert payload["path"] is None
     assert not saved_path.exists()
 
