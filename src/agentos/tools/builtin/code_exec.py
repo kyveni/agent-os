@@ -194,11 +194,35 @@ def _execution_result_json(
     timed_out: bool,
     elapsed_ms: int,
 ) -> str:
+    # Redact secrets from captured output before it reaches the model.
+    # shell.py does this on every output surface; execute_code must match the
+    # same egress policy (see redact.redact_terminal_output). A script that
+    # prints os.environ / a credential file would otherwise leak it raw.
+    #
+    # Redact BEFORE truncating: a credential straddling the output cap would
+    # otherwise be cut in half first, and the surviving prefix no longer
+    # matches the shape pattern, leaking a partial key.
+    #
+    # code_file=False is a deliberate divergence from redact_terminal_output,
+    # which passes code_file=not assignments (assignment pass only for env
+    # dumps / credential-file reads). execute_code output is arbitrary script
+    # output that routinely prints os.environ and credential files, so the
+    # assignment pass must run unconditionally here. The cost is that
+    # `api_key=*** in printed source becomes `api_key=*** — acceptable
+    # for a code-execution surface where real secrets are the norm.
+    from agentos.redact import redact_sensitive_text
+
+    redacted_stdout = redact_sensitive_text(stdout, force=True, code_file=False)
+    redacted_stderr = redact_sensitive_text(stderr, force=True, code_file=False)
     return json.dumps(
         {
             "exit_code": returncode,
-            "stdout": stdout[:_MAX_OUTPUT_CHARS],
-            "stderr": stderr[:_MAX_OUTPUT_CHARS],
+            "stdout": (redacted_stdout if redacted_stdout is not None else stdout)[
+                :_MAX_OUTPUT_CHARS
+            ],
+            "stderr": (redacted_stderr if redacted_stderr is not None else stderr)[
+                :_MAX_OUTPUT_CHARS
+            ],
             "timed_out": timed_out,
             "elapsed_ms": elapsed_ms,
         },

@@ -42,6 +42,22 @@ def _surface(value: str | ConnectionSurface | None) -> ConnectionSurface:
         raise ValueError(f"Invalid client kind: {value!r}") from exc
 
 
+def token_equals(provided: str | None, configured: str | None) -> bool:
+    """Constant-time comparison of gateway tokens.
+
+    Uses :func:`hmac.compare_digest` on UTF-8-encoded bytes so that
+    response-time side channels cannot leak the secret. Fails closed:
+    returns ``False`` when either value is missing, empty, or not a string.
+    """
+    import hmac
+
+    if not provided or not configured:
+        return False
+    if not isinstance(provided, str) or not isinstance(configured, str):
+        return False
+    return hmac.compare_digest(provided.encode("utf-8"), configured.encode("utf-8"))
+
+
 def resolve_auth(
     config: GatewayConfig,
     auth_params: dict,
@@ -68,7 +84,7 @@ def resolve_auth(
     if config.auth.mode == "token":
         provided = (auth_params or {}).get("token")
         configured = config.auth.token
-        if not configured or provided != configured:
+        if not configured or not token_equals(provided, configured):
             log.warning("auth.failed", mode=config.auth.mode, error="invalid token")
             return None
         return AccessContext(

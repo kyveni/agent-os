@@ -639,7 +639,10 @@ Read: [`sessions.md`](sessions.md)
 ```sh
 agentos memory status
 agentos memory index
-agentos memory list
+agentos memory list --source all
+agentos memory ingest /path/to/docs
+agentos memory curated get --target memory
+agentos memory curated add "Important project convention"
 agentos memory search "preference"
 agentos memory show <path>
 agentos memory raw-fallbacks list

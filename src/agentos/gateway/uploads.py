@@ -366,7 +366,9 @@ def register_upload_routes(
 
     async def upload_handler(request: Request) -> JSONResponse:
         if config.auth.mode == "token":
-            if config.auth.token and _extract_authorization_token(request) != config.auth.token:
+            from agentos.gateway.auth import token_equals
+
+            if not token_equals(_extract_authorization_token(request), config.auth.token):
                 return JSONResponse(
                     {
                         "error": (
