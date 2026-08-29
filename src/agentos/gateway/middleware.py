@@ -242,9 +242,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)  # type: ignore[no-any-return]
 
         if auth_mode == "token":
+            from agentos.gateway.auth import token_equals
+
             token = self._extract_token(request)
             configured_token = self._config.auth.token
-            if not configured_token or token != configured_token:
+            if not token_equals(token, configured_token):
                 return JSONResponse(
                     {"error": "Unauthorized", "code": "UNAUTHORIZED"}, status_code=401
                 )
