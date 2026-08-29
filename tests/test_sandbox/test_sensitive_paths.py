@@ -103,3 +103,27 @@ def test_posix_sensitive_paths_stay_blocked_on_windows_runners() -> None:
         sensitive_path_in_text("cat /root/.ssh/id_rsa", workspace=workspace)
         == "~/.ssh"
     )
+
+
+def test_bare_root_is_sensitive() -> None:
+    """rm -rf / must be blocked by the hard block."""
+    assert is_sensitive_path("/") == "/"
+    assert is_sensitive_path("/.") == "/"
+    assert is_sensitive_path("/*") == "/"
+
+
+def test_bare_root_blocks_rm_rf() -> None:
+    """rm -rf / triggers the hard block."""
+    assert sensitive_target_in_command("rm -rf /") == "/"
+    assert sensitive_target_in_command("rm -rf --no-preserve-root /") == "/"
+
+
+def test_bare_root_blocks_rm_rf_with_glob() -> None:
+    assert sensitive_target_in_command("rm -rf /*") == "/"
+
+
+def test_bare_root_leaves_legitimate_commands_alone() -> None:
+    """Files under / (like /tmp) are not affected by the root block."""
+    assert is_sensitive_path("/tmp") is None
+    assert is_sensitive_path("/tmp/foo.txt") is None
+    assert sensitive_target_in_command("rm /tmp/scratch.txt") is None
