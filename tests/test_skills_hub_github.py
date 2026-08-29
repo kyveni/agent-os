@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import pytest
@@ -27,6 +28,13 @@ class _Response:
         if self.status_code >= 400:
             raise RuntimeError(f"HTTP {self.status_code}")
 
+    async def aiter_bytes(self) -> AsyncGenerator[bytes, None]:
+        if self.content:
+            yield self.content
+
+    async def aclose(self) -> None:
+        pass
+
 
 class _AsyncClient:
     tree_entries = [
@@ -50,6 +58,12 @@ class _AsyncClient:
 
     async def __aexit__(self, *args: Any) -> None:
         return None
+
+    def build_request(self, method: str, url: str, **kwargs: Any) -> str:
+        return url
+
+    async def send(self, request: str, **kwargs: Any) -> _Response:
+        return await self.get(request)
 
     async def get(self, url: str, **kwargs: Any) -> _Response:
         self.requests.append((url, kwargs))
