@@ -225,17 +225,17 @@ async def http_request(
 
         # Stream body inside the client context so the transport pool is
         # still alive. Accumulate with a hard byte ceiling to prevent OOM.
-        _HARD_BYTE_CEILING = _BINARY_BODY_LIMIT
+        hard_byte_ceiling = _BINARY_BODY_LIMIT
         chunks: list[bytes] = []
         total = 0
         async for chunk in response.aiter_bytes():
-            remaining = _HARD_BYTE_CEILING - total
+            remaining = hard_byte_ceiling - total
             if remaining <= 0:
                 break
             chunks.append(chunk[:remaining])
             total += len(chunks[-1])
         raw_body = b"".join(chunks)
-        download_capped = total >= _HARD_BYTE_CEILING
+        download_capped = total >= hard_byte_ceiling
 
         await response.aclose()
 
