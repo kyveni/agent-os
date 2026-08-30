@@ -229,23 +229,24 @@ async def http_request(
         )
         response = await client.send(request, stream=True)
 
-    content_type = response.headers.get("content-type", "")
-    is_text = _is_text_response_content_type(content_type)
+        content_type = response.headers.get("content-type", "")
+        is_text = _is_text_response_content_type(content_type)
 
-    # Stream body with a hard byte ceiling to prevent OOM on oversized
-    # responses. The byte ceiling is the display cap (1 MB) — we don't need
-    # more than that in memory regardless of the output path.
-    _HARD_BYTE_CEILING = _BINARY_BODY_LIMIT
-    chunks: list[bytes] = []
-    total = 0
-    async for chunk in response.aiter_bytes():
-        remaining = _HARD_BYTE_CEILING - total
-        if remaining <= 0:
-            break
-        chunks.append(chunk[:remaining])
-        total += len(chunks[-1])
-    raw_body = b"".join(chunks)
-    download_capped = total >= _HARD_BYTE_CEILING
+        # Stream body inside the client context so the transport pool is
+        # still alive. Accumulate with a hard byte ceiling to prevent OOM.
+        hard_byte_ceiling = _BINARY_BODY_LIMIT
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in response.aiter_bytes():
+            remaining = hard_byte_ceiling - total
+            if remaining <= 0:
+                break
+            chunks.append(chunk[:remaining])
+            total += len(chunks[-1])
+        raw_body = b"".join(chunks)
+        download_capped = total >= hard_byte_ceiling
+
+        await response.aclose()
 
     should_save = output_path is not None
     from agentos.safety.injection_guard import wrap_untrusted_boundary
