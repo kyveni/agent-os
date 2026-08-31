@@ -114,6 +114,18 @@ _SHELL_NAMES = (
 #
 # Bind posture (host/port/listen) is CLI-only by design — ``rpc_config.py``
 # already refuses to persist it — so it is listed here for the same reason.
+_PROXY_NAMES = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+    "NO_PROXY",
+    "no_proxy",
+    "AGENTOS_LLM_PROXY",
+)
+
 _AGENTOS_POSTURE_NAMES = (
     "AGENTOS_SENSITIVE_PATHS_DISABLED",
     "AGENTOS_SENSITIVE_PAYLOAD_DISABLED",
@@ -140,12 +152,13 @@ _AGENTOS_POSTURE_NAMES = (
 
 #: Names that may never be written through an AgentOS surface.
 WRITE_DENYLIST: frozenset[str] = frozenset(
-    _LOADER_NAMES + _INTERPRETER_NAMES + _SHELL_NAMES + _AGENTOS_POSTURE_NAMES
+    _LOADER_NAMES + _INTERPRETER_NAMES + _SHELL_NAMES + _PROXY_NAMES + _AGENTOS_POSTURE_NAMES
 )
 
 _DENY_MESSAGE = (
     "Environment variable {key!r} cannot be written through AgentOS. Names that "
-    "steer subprocess execution (PATH, LD_PRELOAD, PYTHONPATH, EDITOR, ...) or "
+    "steer subprocess execution (PATH, LD_PRELOAD, PYTHONPATH, EDITOR, ...), "
+    "egress-steering (HTTP_PROXY, AGENTOS_LLM_PROXY, ...), or "
     "AgentOS runtime posture (AGENTOS_AGENT_PERMISSIONS, AGENTOS_GATEWAY_TOKEN, "
     "...) are refused so this surface cannot escalate its own privileges. Edit "
     "~/.agentos/.env directly if you genuinely need to set it."
