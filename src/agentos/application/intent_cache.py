@@ -34,6 +34,16 @@ def _norm_path(raw: str, *, base_dir: str | Path | None = None) -> str:
     """
     if not raw or raw.startswith(("$", "`")) or raw in {"*", "-"}:
         return raw
+    # Paths that are bare root references (``/*``, ``/``, ``/.``) are
+    # ambiguous on Windows (no drive letter) and Path.resolve() would
+    # incorrectly join them with the CWD, making the root-sensitive-path
+    # hard block unreachable.  Return them as-is.
+    stripped = raw.strip().replace("\\", "/")
+    if stripped in ("/", "/.", "/*"):
+        return raw
+    _drive, tail = os.path.splitdrive(stripped)
+    if tail.strip("/\\") == "":
+        return raw
     try:
         path = Path(raw).expanduser()
         if base_dir is not None and not path.is_absolute():

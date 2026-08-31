@@ -112,6 +112,21 @@ def _looks_like_rooted_path_text(path: str) -> bool:
     return normalized.startswith(("/", "~/")) and not normalized.startswith("//")
 
 
+def _is_root_target(text: str) -> bool:
+    """Return True if *text* resolves to a bare root target.
+
+    On Windows, ``Path("/*").is_absolute()`` is ``False`` (no drive
+    letter), so the normal ``is_sensitive_path`` guard in
+    :func:`sensitive_path_marker` is bypassed entirely.  This helper
+    catches the same pattern after path normalization.
+    """
+    stripped = text.strip().replace("\\", "/")
+    if stripped in ("/", "/.", "/*"):
+        return True
+    _drive, tail = os.path.splitdrive(stripped)
+    return tail.strip("/\\") == ""
+
+
 def _path_name(path: str) -> str:
     normalized = str(path).strip().replace("\\", "/").rstrip("/")
     return PurePosixPath(normalized).name.lower()
@@ -139,6 +154,21 @@ def is_sensitive_path(path: str) -> str | None:
         return None
     if not path:
         return None
+
+    # Block bare root targets: ``/``, ``/.``, ``/*``, and empty-after-strip variants.
+    # On Windows, drive-letter roots like ``C:\`` are also covered.
+    # ``rm -rf /`` is the most destructive command — never allow it without
+    # the explicit /elevated full escape hatch.
+    stripped = path.strip().replace("\\", "/")
+    if stripped in ("/", "/.", "/*", "/ *"):
+        return "/"
+    # Cross-platform: strip drive letter and check for empty/root tail.
+    # On Windows, Path("/").resolve() may produce a drive-letter root like
+    # ``C:\``, and ``_norm_path`` in the intent layer will pass it through.
+    _drive, tail = os.path.splitdrive(stripped)
+    if tail.strip("/\\") == "":
+        return "/"
+
     candidates = _comparison_path_candidates(path)
     for expanded in candidates:
         if (
@@ -242,9 +272,17 @@ def sensitive_path_marker(
     ):
         return _sensitive_leaf_marker(text)
 
+    # Re-check root-like targets after path normalization may have stripped
+    # the leading ``/`` on Windows (where ``/*`` is not absolute).
+    if _is_root_target(text):
+        return "/"
+
     marker = is_sensitive_path(path)
     if marker is None:
         return None
+    # Root marker ("/") is absolute — never soften it with workspace exceptions.
+    if marker == "/":
+        return marker
     if _workspace_contains(path, workspace) and _workspace_nested_under_marker(
         workspace, marker
     ):
