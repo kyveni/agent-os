@@ -3836,6 +3836,7 @@ class TurnRunner:
                 )
             ctx = self._apply_runtime_capability_denies(ctx)
             ctx = self._apply_user_route_pin_denies(ctx)
+            ctx = self._apply_plan_mode_enforcement(ctx)
             log.debug(
                 "tool_policy.policy_pre",
                 allowed_tool_count=len(self._tool_registry.to_tool_definitions(ctx)),
@@ -3902,6 +3903,33 @@ class TurnRunner:
         if hold is None:
             return ctx
         return replace(ctx, denied_tools=set(ctx.denied_tools) | {"router_control"})
+
+    def _apply_plan_mode_enforcement(self, ctx: ToolContext) -> ToolContext:
+        """
+        Enforce the plan-mode tool allowlist for non-background entry points.
+
+        Mirrors the gateway's plan-mode check in routing.py so that CLI,
+        channel, and web turns also respect plan mode. Cron and subagent
+        turns keep their own surfaces — plan mode is user-facing only.
+        """
+        if ctx is None or ctx.caller_kind in {CallerKind.CRON, CallerKind.SUBAGENT}:
+            return ctx
+        session_key = ctx.session_key
+        if not session_key:
+            return ctx
+        try:
+            from agentos.plan_mode import PLAN_MODE_TOOL_ALLOW, get_plan_mode_store
+
+            if get_plan_mode_store().is_enabled(session_key):
+                allowed = (
+                    set(PLAN_MODE_TOOL_ALLOW)
+                    if ctx.allowed_tools is None
+                    else ctx.allowed_tools & PLAN_MODE_TOOL_ALLOW
+                )
+                ctx = replace(ctx, allowed_tools=allowed)
+        except Exception:
+            log.exception("plan_mode.apply_failed")
+        return ctx
 
     def _apply_runtime_capability_denies(self, ctx: ToolContext) -> ToolContext:
         from agentos.tools.policy import (
