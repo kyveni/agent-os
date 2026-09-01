@@ -68,6 +68,7 @@ _PRESETS: dict[str, str] = {
 @dataclass(frozen=True)
 class CronField:
     values: frozenset[int]
+    is_wildcard: bool = False
 
     def matches(self, value: int) -> bool:
         return value in self.values
@@ -83,16 +84,31 @@ class CronExpression:
     raw: str
 
     def matches(self, dt: datetime) -> bool:
-        return (
+        # Standard AND for all fields except the POSIX day-of-month/day-of-week
+        # special case: when both are restricted (neither is a literal `*`),
+        # the job fires when EITHER field matches (POSIX OR).
+        base = (
             self.minute.matches(dt.minute)
             and self.hour.matches(dt.hour)
-            and self.day_of_month.matches(dt.day)
             and self.month.matches(dt.month)
-            and self.day_of_week.matches((dt.weekday() + 1) % 7)  # Python Mon=0 → cron Sun=0
         )
+        if not base:
+            return False
+
+        dom_ok = self.day_of_month.matches(dt.day)
+        dow_ok = self.day_of_week.matches((dt.weekday() + 1) % 7)  # Python Mon=0 → cron Sun=0
+
+        if not self.day_of_month.is_wildcard and not self.day_of_week.is_wildcard:
+            # POSIX: when both day-of-month and day-of-week are restricted,
+            # fire when either matches (OR).
+            return dom_ok or dow_ok
+
+        # Standard AND fallback.
+        return dom_ok and dow_ok
 
 
 def _parse_field(token: str, field_name: str, names: dict[str, int] | None = None) -> CronField:
+    is_wildcard = token.strip() == "*"
     lo, hi = _FIELD_RANGES[field_name]
     values: set[int] = set()
 
@@ -157,7 +173,7 @@ def _parse_field(token: str, field_name: str, names: dict[str, int] | None = Non
         values.remove(7)
         values.add(0)
 
-    return CronField(frozenset(values))
+    return CronField(frozenset(values), is_wildcard=is_wildcard)
 
 
 def _to_int(s: str, field_name: str, lo: int, hi: int) -> int:
