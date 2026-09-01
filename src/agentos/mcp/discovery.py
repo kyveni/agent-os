@@ -165,7 +165,6 @@ def _make_tool_handler(
         return result.content
 
     registry.register(spec, handler)
-    return f"mcp_{tool_name}"
 
 
 async def discover_and_register(
