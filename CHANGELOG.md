@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `classify_provider_error` now correctly classifies `insufficient_quota`
+  (HTTP 429) as `INSUFFICIENT_CREDITS` instead of `RATE_LIMITED` for
+  OpenAI-compatible providers, and `billing_error` (HTTP 402) as
+  `INSUFFICIENT_CREDITS` instead of `UNKNOWN` for Anthropic (#777).
+
+- `bankr`, `volcengine_coding_plan`, and `byteplus_coding_plan` are now
+  included in the OpenAI-compatible provider set so their HTTP errors are
+  correctly classified instead of falling through to `UNKNOWN` (#775).
+
 ## [2026.9.2] - 2026-09-02
 
 ### Added

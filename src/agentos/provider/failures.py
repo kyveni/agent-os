@@ -54,6 +54,10 @@ _OPENAI_COMPAT_PROVIDERS = {
     "vllm",
     "lm_studio",
     "ovms",
+    # Added in #775 — these providers also use the openai_compat backend
+    "bankr",
+    "volcengine_coding_plan",
+    "byteplus_coding_plan",
 }
 
 _GATEWAY_TRANSIENT_STATUS_CODES = {499, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529}
@@ -123,6 +127,32 @@ def _is_empty_response(raw_code: str, message: str) -> bool:
     }
 
 
+def _is_insufficient_credits(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in (
+            # OpenAI / OpenAI-compatible providers
+            "insufficient_quota",
+            "insufficient quota",
+            "insufficient credits",
+            "no credits",
+            "exceeded your current quota",
+            "quota exceeded",
+            "out of credits",
+            "credits exhausted",
+            # Anthropic
+            "billing_error",
+            "credit balance is too low",
+            # Generic gateways
+            "billing hard limit",
+            "exceeded spend limit",
+            "payment required",
+            "insufficient balance",
+            "billing failed",
+        )
+    )
+
+
 def _is_gateway_transient(text: str) -> bool:
     return bool(_GATEWAY_TRANSIENT_RE.search(text))
 
@@ -144,6 +174,14 @@ def classify_provider_error(
         return ProviderFailureKind.POLICY_REFUSAL
     if _is_empty_response(raw_code, message):
         return ProviderFailureKind.EMPTY_RESPONSE
+
+    # Provider-agnostic, BEFORE any provider-specific block: OpenAI-compat
+    # providers report credit exhaustion with HTTP 429 ("insufficient_quota"),
+    # which would otherwise land in the rate-limit branch below and wrongly
+    # trip the circuit breaker. HTTP 402 "Payment Required" is semantically
+    # credit exhaustion for any provider.
+    if status_code == 402 or _is_insufficient_credits(text):
+        return ProviderFailureKind.INSUFFICIENT_CREDITS
 
     if provider in _OPENAI_COMPAT_PROVIDERS:
         if status_code in {401, 403} or "invalid api key" in text or "unauthorized" in text:
