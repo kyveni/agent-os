@@ -250,9 +250,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 )
 
         elif auth_mode == "trusted-proxy":
+            # Reject if no proxy is configured — fail closed (#352).
             proxy = self._config.auth.trusted_proxy
-            forwarded_for = request.headers.get("x-forwarded-for", "")
-            if proxy and proxy not in forwarded_for:
+            if not proxy:
+                return JSONResponse(
+                    {"error": "Unauthorized", "code": "UNAUTHORIZED"}, status_code=401
+                )
+            # Check the real transport peer IP, not the client-supplied
+            # X-Forwarded-For header (which is trivially spoofable).
+            peer_ip = request.client.host if request.client else None
+            trusted_set = {
+                p.strip().lower().strip("[]")
+                for p in proxy.split(",")
+                if p.strip()
+            }
+            peer = (peer_ip or "").strip().lower().strip("[]")
+            if peer not in trusted_set:
                 return JSONResponse(
                     {"error": "Unauthorized", "code": "UNAUTHORIZED"}, status_code=401
                 )
