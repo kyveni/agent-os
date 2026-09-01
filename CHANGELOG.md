@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+
+- `sessions export` now sanitizes the session_id before using it as a
+  filename, preventing path traversal. Slashes, backslashes, and other
+  non-alphanumeric characters are stripped.
+
 ## [2026.9.2] - 2026-09-02
 
 ### Added
