@@ -239,6 +239,26 @@ def validate_http_url_for_fetch(
         assert_address_allowed_for_fetch(hostname, addr, trusted_networks)
 
 
+def validate_mcp_server_url(url: str | None) -> None:
+    """Validate an MCP server URL against metadata SSRF endpoints.
+
+    Blocks cloud metadata endpoints (169.254.169.254, metadata.google.internal,
+    etc.) while allowing private/LAN addresses that are legitimate for local
+    MCP servers.
+    """
+    if not url:
+        return  # will fail on connect with its own error
+    try:
+        assert_not_metadata_endpoint(url)
+    except SSRFBlockedError:
+        raise
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise UnsupportedURLSchemeError(
+            f"MCP server URL must use http or https, got {parsed.scheme}"
+        )
+
+
 def _hard_block_reason(addr: IPAddress) -> str | None:
     for network in _HARD_BLOCKED_NETWORKS:
         if addr.version == network.version and addr in network:
