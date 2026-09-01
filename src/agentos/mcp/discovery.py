@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
@@ -26,6 +26,10 @@ class ActiveMCPClient:
     transport: str
     client: MCPClient
     registered_tools: tuple[str, ...] = ()
+    # Tool definitions keyed by registered name (e.g. "mcp_lookup"),
+    # kept for re-registration when a colliding owner disconnects.
+    tool_defs: dict[str, MCPToolDef] = field(default_factory=dict)
+    tool_timeout: float = 10.0
 
     async def close(self) -> None:
         await self.client.close()
@@ -62,15 +66,49 @@ async def close_active_clients(owner: str | None = None) -> int:
 
 
 async def disconnect_and_unregister(owner: str, registry: ToolRegistry) -> int:
-    """Close one MCP server and remove the tools registered by that server."""
-    entries = [
+    """Close one MCP server and remove the tools registered by that server.
+
+    When multiple active servers share a same-named tool, the handler
+    from the most recently registered surviving server is re-registered
+    so it continues to point at a live client.
+    """
+    snapshot = active_clients_snapshot()
+    leaving = [
         entry
-        for entry in active_clients_snapshot()
+        for entry in snapshot
         if entry.owner == owner or entry.server_name == owner
     ]
-    for entry in entries:
+    remaining = [
+        entry
+        for entry in snapshot
+        if not (entry.owner == owner or entry.server_name == owner)
+    ]
+
+    # Collect all tool names owned by still-active servers.
+    still_alive: dict[str, ActiveMCPClient] = {}
+    for entry in remaining:
         for name in entry.registered_tools:
-            registry.unregister(name)
+            # The last entry in iteration wins (most recent registration
+            # is authoritative — it overwrote earlier entries).
+            still_alive[name] = entry
+
+    for entry in leaving:
+        for name in entry.registered_tools:
+            survivor = still_alive.get(name)
+            if survivor is not None:
+                # Re-register using the surviving server's client so the
+                # handler does not point at the closing server.
+                tool_def = survivor.tool_defs.get(name)
+                if tool_def is not None:
+                    _make_tool_handler(
+                        survivor.client,
+                        name.removeprefix("mcp_"),
+                        tool_def,
+                        registry,
+                        survivor.tool_timeout,
+                    )
+            else:
+                registry.unregister(name)
     return await close_active_clients(owner)
 
 
@@ -127,6 +165,7 @@ def _make_tool_handler(
         return result.content
 
     registry.register(spec, handler)
+    return f"mcp_{tool_name}"
 
 
 async def discover_and_register(
@@ -144,6 +183,7 @@ async def discover_and_register(
     entry: ActiveMCPClient | None = None
 
     registered: list[str] = []
+    tool_defs: dict[str, MCPToolDef] = {}
     try:
         await client.connect()
         tools = await client.list_tools()
@@ -155,13 +195,17 @@ async def discover_and_register(
                 registry,
                 timeout_seconds=config.tool_timeout_seconds,
             )
-            registered.append(f"mcp_{t.name}")
+            registered_name = f"mcp_{t.name}"
+            registered.append(registered_name)
+            tool_defs[registered_name] = t
         entry = ActiveMCPClient(
             owner=owner or config.name,
             server_name=config.name,
             transport=config.transport,
             client=client,
             registered_tools=tuple(registered),
+            tool_defs=tool_defs,
+            tool_timeout=config.tool_timeout_seconds,
         )
         _active_clients.append(entry)
     except BaseException:
