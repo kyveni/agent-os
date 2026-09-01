@@ -352,9 +352,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if self._is_ui_path(path):
             return await call_next(request)  # type: ignore[no-any-return]
-        if request.method == "GET" and path == "/api/approvals":
-            return await call_next(request)  # type: ignore[no-any-return]
-
         client_ip = self._get_client_ip(request)
         now = time.time()
         window = float(self._config.rate_limit.window_seconds)
