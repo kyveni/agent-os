@@ -398,6 +398,65 @@ def _merge_router_tiers(
     return merged
 
 
+def _validate_provider_base_url(base_url: str) -> None:
+    """Validate a caller-supplied LLM provider base_url.
+
+    Rejects non-network schemes (file://, data://, ...), non-http(s) schemes,
+    private/reserved IPs (RFC 1918, RFC 6598, link-local, and the cloud
+    metadata IP 169.254.169.254).  Localhost (127.0.0.0/8, ::1) stays allowed
+    for local model servers (Ollama, vLLM).
+
+    Saved/default base_urls from trusted config are NOT re-validated — this
+    only catches the caller-supplied argument at onboarding time.
+    """
+    import ipaddress
+    from urllib.parse import urlparse
+
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(
+            "base_url must be an absolute http(s) URL "
+            "(e.g. http://localhost:11434/v1)"
+        )
+
+    host = parsed.hostname
+    if not host:
+        raise ValueError("base_url must have a hostname")
+
+    # Resolve a literal IP for private/reserved checks.
+    # Non-IP hostnames (e.g. "api.openai.com") are not blocked here;
+    # DNS rebinding at connect time is a separate concern.
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return  # hostname, not a literal IP
+
+    if addr.is_loopback:
+        return  # localhost is explicitly allowed
+
+    if addr.is_private:
+        raise ValueError(
+            f"base_url points to a private IP address ({host}) — "
+            "use a public endpoint or a localhost address for local models"
+        )
+
+    if addr.is_unspecified:
+        raise ValueError(
+            f"base_url points to an unspecified IP address ({host})"
+        )
+
+    if addr.is_link_local:
+        raise ValueError(
+            f"base_url points to a link-local IP address ({host}) — "
+            "this would reach cloud metadata services"
+        )
+
+    if addr.is_global is False:
+        raise ValueError(
+            f"base_url points to a reserved IP address ({host})"
+        )
+
+
 def _validate_judge_base_url(base_url: str) -> None:
     """Validate the *shape* of a local judge endpoint URL.
 
@@ -533,6 +592,8 @@ def upsert_llm_provider(
         if saved_profile is not None
         else (config.llm.base_url if active_provider == provider_id else "")
     )
+    if base_url:
+        _validate_provider_base_url(base_url)
     effective_base_url = base_url or saved_base_url or spec.default_base_url
     if spec.requires_base_url and not effective_base_url:
         raise ValueError(f"provider {provider_id!r} requires a base_url")
