@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Jinja2 `autoescape` is now enabled in identity prompt rendering to prevent
+  cross-site scripting via user-controlled template values (#850).
+
 - `classify_provider_error` now correctly classifies `insufficient_quota`
   (HTTP 429) as `INSUFFICIENT_CREDITS` instead of `RATE_LIMITED` for
   OpenAI-compatible providers, and `billing_error` (HTTP 402) as

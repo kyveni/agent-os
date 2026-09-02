@@ -161,14 +161,14 @@ def test_runtime_section_carries_os_shell_and_working_directory() -> None:
     prompt = assemble_system_prompt(
         AgentProfile(agent_id="main", prompt_mode="full"),
         tools=_TOOLS,
-        runtime_info={"os": "Darwin", "shell": "/bin/zsh", "workspace_dir": "<WS>"},
+        runtime_info={"os": "Darwin", "shell": "/bin/zsh", "workspace_dir": "/tmp/ws"},
     )
 
     assert prompt.count("## Runtime") == 1
     assert "## Workspace" not in prompt
     assert "- OS: Darwin" in prompt
     assert "- Shell: /bin/zsh" in prompt
-    assert "- Working directory: <WS>" in prompt
+    assert "- Working directory: /tmp/ws" in prompt
 
 
 def test_runtime_section_omits_workspace_line_when_unset() -> None:
@@ -196,7 +196,7 @@ def test_section_headings_always_follow_a_blank_line() -> None:
         AgentProfile(agent_id="main", prompt_mode="full", identity=AgentIdentity(name="Bin")),
         tools=[*_TOOLS, "image_generate", "execute_code", "memory_search", "session_search"],
         memory="MEMORY (your personal notes)\n\n- example",
-        runtime_info={"os": "Darwin", "shell": "/bin/zsh", "workspace_dir": "<WS>"},
+        runtime_info={"os": "Darwin", "shell": "/bin/zsh", "workspace_dir": "/tmp/ws"},
         heartbeat_prompt="Heartbeat polls arrive as system events.",
         channels_enabled=True,
         unattended_context=True,
