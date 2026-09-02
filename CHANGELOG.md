@@ -67,6 +67,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Telegram webhook secret token verification now uses
+   constant-time comparison instead of standard
+  string inequality, preventing a timing side-channel for remote
+  secret extraction.
+  ([#962](https://github.com/use-agent-os/agent-os/issues/962))
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —
