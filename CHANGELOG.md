@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Session deletion (`sessions.delete` RPC, `cap_entries`, `prune_stale`) now
+  calls `_evict_session_runtime_state` before removing from storage, closing
+  an unbounded memory leak in `SpawnGroupTracker`, routing history, and spawn
+  locks (#750).
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —

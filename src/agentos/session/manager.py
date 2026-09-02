@@ -1532,7 +1532,18 @@ class SessionManager:
     async def prune_stale(self, max_age_ms: int) -> int:
         """Delete sessions older than max_age_ms. Returns number pruned."""
         cutoff = _now_ms() - max_age_ms
-        return await self._storage.prune_stale_sessions(cutoff)
+        # Evict runtime state BEFORE storage delete so in-memory bookkeeping
+        # does not leak (see #750). Bypass _storage.prune_stale_sessions
+        # because it calls delete_session without eviction.
+        async with self._storage.conn.execute(
+            "SELECT session_key FROM sessions WHERE updated_at < ?",
+            (cutoff,),
+        ) as cur:
+            rows = await cur.fetchall()
+        for (session_key,) in rows:
+            self._evict_session_runtime_state(session_key)
+            await self._storage.delete_session(session_key)
+        return len(rows)
 
     async def cap_entries(self, max_entries: int = 500) -> int:
         """Delete oldest sessions beyond max_entries. Returns number deleted."""
@@ -1543,6 +1554,7 @@ class SessionManager:
         # sorted by updated_at asc — oldest first
         to_delete = sorted(sessions, key=lambda s: s.updated_at)[: total - max_entries]
         for s in to_delete:
+            self._evict_session_runtime_state(s.session_key)
             await self._storage.delete_session(s.session_key)
         return len(to_delete)
 

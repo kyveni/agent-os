@@ -1946,10 +1946,16 @@ async def _handle_sessions_delete(params: dict | None, ctx: RpcContext) -> dict:
     if not keys:
         raise ValueError("params.key or params.keys is required")
 
+    from agentos.session.manager import SessionManager
+
     deleted: list[str] = []
     errors: list[str] = []
     for k in keys:
         try:
+            # Evict in-memory runtime state before deleting from storage
+            # so SpawnGroupTracker, routing history, and spawn locks are
+            # not leaked (see #750).
+            SessionManager._evict_session_runtime_state(k)
             await storage.delete_session(k)
             deleted.append(k)
         except Exception as exc:
