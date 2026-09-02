@@ -149,6 +149,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Security
 
+- Webhook delivery (`scheduler/delivery.py`) now uses
+  `ssrf_guarded_client(validator=validate_metadata_only_address)` at connect
+  time, closing the DNS-rebinding TOCTOU window that was missed when the rest
+  of the codebase was hardened in PR #697 (#725).
 - The MCP SSE and Streamable HTTP transports now connect through the same
   SSRF guard as the built-in HTTP tools. Both built a bare `httpx.AsyncClient`
   from `MCPServerConfig.url` with no validation at all, so an MCP server entry
