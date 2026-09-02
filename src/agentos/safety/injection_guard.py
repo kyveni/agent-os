@@ -146,9 +146,24 @@ _EXFILTRATION_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     ),
 )
 
+#: Match pattern-semantic regexes against *normalized* text
+# (invisible chars replaced with spaces) so these words still
+# separate correctly. Keep invisible_char detection on the raw text.
+_INVISIBLE_CHAR_STRIP_RE = re.compile(
+    "["
+    "\u00ad"  # soft hyphen
+    "\u200b-\u200f"  # zero-width space .. RTL mark
+    "\u202a-\u202e"  # LRO .. RLO
+    "\u2060-\u2064"  # word joiner .. invisible plus
+    "\u2066-\u2069"  # LRI .. RLI
+    "\ufeff"  # BOM
+    "]"
+)
+
+
 _INVISIBLE_CHAR_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
-    # Zero-width space, ZWNJ, ZWJ, BOM
-    re.compile(r"[\u200b\u200c\u200d\ufeff]"),
+    # Zero-width space, ZWNJ, ZWJ, soft hyphen, word joiner, BOM
+    re.compile(r"[\u00ad\u200b\u200c\u200d\u2060\u2061\ufeff]"),
     # Bidi and right-to-left override (used to visually reorder payloads)
     re.compile(r"[\u202a-\u202e\u2066-\u2069]"),
 )
@@ -186,10 +201,23 @@ def classify_injection(text: str) -> list[str]:
 
     if not text:
         return []
+
     hits: set[str] = set()
+
+    # Normalise text for semantic pattern matching:
+    # invisible characters (soft hyphens, word joiners, ZWS, etc.) are
+    # replaced by a space so intent phrases like "ignore all prior
+    # instructions" still separate into words and match. The
+    # invisible_char class is still checked against the *raw* text.
+    normalized = _INVISIBLE_CHAR_STRIP_RE.sub(" ", text)
+    if text != normalized:
+        hits.add("invisible_char")
+
     for threat_class, patterns in INJECTION_PATTERNS.items():
+        if threat_class == "invisible_char":
+            continue  # already checked above
         for pattern in patterns:
-            if pattern.search(text):
+            if pattern.search(normalized):
                 hits.add(threat_class)
                 break
     return sorted(hits)

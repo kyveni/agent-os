@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Injection guard now normalizes invisible Unicode characters before pattern
+  matching, preventing soft hyphen (U+00AD), word joiner (U+2060) and other
+  zero-width characters from bypassing intent-phrase detection. Also adds
+  U+00AD and U+2060/U+2061 to the invisible_char threat patterns.
+  ([#690](https://github.com/use-agent-os/agent-os/issues/690))
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —
