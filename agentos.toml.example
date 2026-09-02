@@ -548,7 +548,7 @@ security_grading = false
 # which runs interactive Control tool execution on the host while still blocking sensitive
 # paths. Use `agentos sandbox on|bypass|full|reset` to update this together
 # with the sandbox section.
-default_mode = "bypass"                 # off | on | bypass | full
+cron_default_mode = "bypass"                 # off | on | bypass | full
 
 # Default elevation posture for unattended cron turns (agent_turn jobs only;
 # reminders, script jobs, and system events are never elevated). Separate
