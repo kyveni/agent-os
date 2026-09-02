@@ -99,10 +99,12 @@ def _set_key(data: dict[str, Any], key: str, value: Any) -> bool:
     cursor: Any = data
     parts = key.split(".")
     for part in parts[:-1]:
-        if not isinstance(cursor, dict) or part not in cursor:
+        if not isinstance(cursor, dict):
             return False
+        if part not in cursor:
+            cursor[part] = {}
         cursor = cursor[part]
-    if not isinstance(cursor, dict) or parts[-1] not in cursor:
+    if not isinstance(cursor, dict):
         return False
     cursor[parts[-1]] = value
     return True

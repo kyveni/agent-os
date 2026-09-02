@@ -33,6 +33,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **`agentos config set` now accepts `skills.config.*` keys** — the dot-notation
+  setter rejected keys like `skills.config.wiki.prompt` because intermediate
+  dicts (`wiki`) didn't exist yet. `_set_key` now auto-vivifies missing
+  intermediate paths before setting the leaf value, and the standard Pydantic
+  validation catches any invalid structures afterward.
+  ([#834](https://github.com/use-agent-os/agent-os/issues/834))
+
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —
