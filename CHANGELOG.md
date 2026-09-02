@@ -67,6 +67,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Intent cache now includes normalized flags in the cache key so
+  approving `rm /tmp/a` no longer implicitly approves `rm -rf /tmp/a`,
+  preventing flag-bypass escalation (#849).
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —
