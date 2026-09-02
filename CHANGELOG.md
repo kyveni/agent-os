@@ -67,6 +67,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **CLI JSON output no longer crashes on non-UTF-8 terminals** — 
+  and  now write UTF-8 bytes to  and
+   instead of relying on . Falls back to
+   if the buffer itself raises .
+  ([#764](https://github.com/use-agent-os/agent-os/issues/764))
+
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —

@@ -3,15 +3,28 @@
 from __future__ import annotations
 
 import json
+import sys
 from typing import Any
 
 import typer
 
 
 def print_json(payload: Any) -> None:
-    """Print JSON payload to stdout using the AgentOS CLI contract."""
+    """Print JSON payload to stdout using the AgentOS CLI contract.
 
-    typer.echo(json.dumps(payload, ensure_ascii=False, default=str))
+    Writes UTF-8 bytes directly to stdout.buffer to avoid
+    UnicodeEncodeError on terminals with non-UTF-8 encoding (e.g.
+    Windows cp1252/cp437). Falls back to ensure_ascii=True on error.
+    """
+
+    try:
+        text = json.dumps(payload, ensure_ascii=False, default=str)
+        sys.stdout.buffer.write((text + "\n").encode("utf-8"))
+        sys.stdout.buffer.flush()
+    except UnicodeEncodeError:
+        text = json.dumps(payload, ensure_ascii=True, default=str)
+        sys.stdout.buffer.write((text + "\n").encode("utf-8", errors="replace"))
+        sys.stdout.buffer.flush()
 
 
 def error_payload(
@@ -40,13 +53,21 @@ def emit_error(
     """Emit an error to stderr without polluting JSON stdout."""
 
     if json_output:
-        typer.echo(
-            json.dumps(
+        try:
+            text = json.dumps(
                 error_payload(message, code=code, details=details),
                 ensure_ascii=False,
                 default=str,
-            ),
-            err=True,
-        )
+            )
+            sys.stderr.buffer.write((text + "\n").encode("utf-8"))
+            sys.stderr.buffer.flush()
+        except UnicodeEncodeError:
+            text = json.dumps(
+                error_payload(message, code=code, details=details),
+                ensure_ascii=True,
+                default=str,
+            )
+            sys.stderr.buffer.write((text + "\n").encode("utf-8", errors="replace"))
+            sys.stderr.buffer.flush()
     else:
         typer.secho(f"Error: {message}", fg=typer.colors.RED, err=True)
