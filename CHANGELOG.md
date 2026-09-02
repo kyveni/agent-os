@@ -33,6 +33,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Serialize SessionStorage transactions with `asyncio.Lock()` to
+  prevent "cannot start a transaction within a transaction" errors
+  when `delete_session`, `delete_project`, or
+  `rewrite_compacted_session` run concurrently.
+  ([#891](https://github.com/use-agent-os/agent-os/issues/891))
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —
