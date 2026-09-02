@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- `RateLimitMiddleware._is_ui_path` now excludes the ``{base_path}/api/``
+  subtree, so the Control UI JSON/RPC surface is still subject to per-IP
+  rate limiting (previously entirely exempt — #748).
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —

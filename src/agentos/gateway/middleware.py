@@ -329,9 +329,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._last_sweep: float = 0.0
 
     def _is_ui_path(self, path: str) -> bool:
+        """Exempt the static UI shell from rate limiting.
+
+        The UI prefix exemption stops at ``{base_path}/api/`` so that the
+        JSON/RPC surface under the Control UI prefix is still subject to
+        per-IP rate limiting (see #748).
+        """
         if self._ui_prefix is None:
             return False
-        return _is_under(self._ui_prefix, path)
+        if not _is_under(self._ui_prefix, path):
+            return False
+        return not _is_under(self._ui_prefix + _API_PREFIX, path)
 
     def _is_trusted_proxy(self, peer_ip: str | None) -> bool:
         return peer_is_trusted_proxy(self._config.auth.trusted_proxy, peer_ip)
