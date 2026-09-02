@@ -95,7 +95,9 @@ def _extract_rm_targets(command: str) -> list[str]:
 
         for tokens in token_sets:
             for token in tokens:
-                if not token or token.startswith("-") or token in seen:
+                if not token or token in seen:
+                    continue
+                if token.startswith("-"):
                     continue
                 seen.add(token)
                 targets.append(token)
@@ -103,15 +105,49 @@ def _extract_rm_targets(command: str) -> list[str]:
     return targets
 
 
+def _extract_flags(command: str) -> str:
+    """Extract and normalize flags from the first ``rm`` invocation.
+
+    Returns a sorted, deduplicated, space-separated string of flags
+    (e.g. ``"-rf"`` for ``rm -rf /a``, ``""`` for ``rm /a``).
+    Non-``rm`` commands always return an empty string.
+    """
+    pattern = re.compile(r"\brm\b([^;\n&|]*)")
+    match = pattern.search(command)
+    if not match:
+        return ""
+    tail = match.group(1).strip()
+    if not tail:
+        return ""
+    try:
+        tokens = shlex.split(tail)
+    except ValueError:
+        tokens = tail.split()
+    flags: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        if token.startswith("-") and token not in seen:
+            seen.add(token)
+            flags.append(token)
+    flags.sort()
+    return " ".join(flags)
+
+
 def _extract_intents(
     command: str,
     *,
     base_dir: str | Path | None = None,
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str, str]]:
     """Return every recognized destructive intent, deduped and normalized.
 
+    Each intent is ``(kind, flags, target)`` where *flags* is the normalized
+    flag set from the ``rm`` invocation (empty string for Python API calls).
     ``rm /a /b /c`` -> three tuples; ``shutil.rmtree('a'); os.remove('b')`` ->
     two tuples; a plain echo returns an empty list.
+
+    Flags are included in the intent key so that ``rm`` and ``rm -rf``
+    targeting the same path are treated as *different* intents, preventing
+    flag-bypass escalation (CERT #849).
     """
     if not command:
         return []
@@ -120,10 +156,11 @@ def _extract_intents(
     for pattern in _PY_DELETE_PATTERNS:
         paths.extend(m.group(1) for m in pattern.finditer(command))
 
-    result: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
+    flags = _extract_flags(command)
+    result: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
     for raw in paths:
-        intent = ("delete", _norm_path(raw, base_dir=base_dir))
+        intent = ("delete", flags, _norm_path(raw, base_dir=base_dir))
         if intent in seen:
             continue
         seen.add(intent)
@@ -131,14 +168,14 @@ def _extract_intents(
     return result
 
 
-def _extract_intent(command: str) -> tuple[str, str] | None:
+def _extract_intent(command: str) -> tuple[str, str, str] | None:
     """First extracted intent, or None. Convenience for single-target callers."""
     intents = _extract_intents(command)
     return intents[0] if intents else None
 
 
 class IntentApprovalCache:
-    """In-memory cache keyed by ``(kind, target)`` with scope-aware expiry.
+    """In-memory cache keyed by ``(kind, flags, target)`` with scope-aware expiry.
 
     Two scopes exist so the approval prompt's ``once`` and ``always`` mean
     what they say:
@@ -153,12 +190,12 @@ class IntentApprovalCache:
     def __init__(self, default_ttl: float = _DEFAULT_TTL_SECONDS) -> None:
         self._default_ttl = default_ttl
         # intent -> (expires_monotonic, scope)
-        self._entries: dict[tuple[str, str], tuple[float, str]] = {}
+        self._entries: dict[tuple[str, str, str], tuple[float, str]] = {}
         self._lock = threading.Lock()
 
     def record(
         self, command: str, ttl: float | None = None, *, scope: str = "once"
-    ) -> list[tuple[str, str]]:
+    ) -> list[tuple[str, str, str]]:
         """Mark every intent extracted from *command* as approved.
 
         Handles multi-target commands like ``rm a b c`` — each path becomes its
@@ -174,7 +211,7 @@ class IntentApprovalCache:
                 self._entries[intent] = (expires, scope)
         return intents
 
-    def record_always(self, command: str) -> list[tuple[str, str]]:
+    def record_always(self, command: str) -> list[tuple[str, str, str]]:
         """Remember every intent in *command* for the session lifetime."""
         return self.record(command, ttl=_ALWAYS_TTL_SECONDS, scope="always")
 

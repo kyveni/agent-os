@@ -96,3 +96,61 @@ class TestRecordAndCheck:
         cache.clear()
         assert cache.check("rm /a") is False
         assert cache.check("rm /b") is False
+
+
+class TestFlagBypassEscalation:
+    """Flag variants of an approved command must NOT be treated as approved.
+
+    CERT #849: approving ``rm /tmp/a`` must NOT implicitly approve
+    ``rm -rf /tmp/a``, because an attacker can escalate from a minimal
+    destructive operation to a full recursive delete.
+    """
+
+    def test_rm_with_flags_not_approved_by_bare_rm(self) -> None:
+        """rm /tmp/a approved -> check('rm -rf /tmp/a') must be False."""
+        cache = IntentApprovalCache()
+        cache.record("rm /tmp/a")
+        assert cache.check("rm /tmp/a") is True
+        assert cache.check("rm -rf /tmp/a") is False
+
+    def test_rm_with_different_flags_not_approved(self) -> None:
+        """rm -rf /tmp/a approved -> check('rm -f /tmp/a') must be False."""
+        cache = IntentApprovalCache()
+        cache.record("rm -rf /tmp/a")
+        assert cache.check("rm -rf /tmp/a") is True
+        assert cache.check("rm -f /tmp/a") is False
+
+    def test_rm_with_same_flags_is_approved(self) -> None:
+        """rm -rf /tmp/a approved -> check('rm -rf /tmp/a') again is True."""
+        cache = IntentApprovalCache()
+        cache.record("rm -rf /tmp/a")
+        assert cache.check("rm -rf /tmp/a") is True
+
+    def test_rm_flag_order_normalized(self) -> None:
+        """Flags are sorted, so -f -r matches -r -f."""
+        cache = IntentApprovalCache()
+        cache.record("rm -r -f /tmp/a")
+        assert cache.check("rm -f -r /tmp/a") is True
+
+    def test_rm_flags_then_no_flags_not_approved(self) -> None:
+        """rm -rf /tmp/a approved -> check('rm /tmp/a') must be False."""
+        cache = IntentApprovalCache()
+        cache.record("rm -rf /tmp/a")
+        assert cache.check("rm -rf /tmp/a") is True
+        assert cache.check("rm /tmp/a") is False
+
+    def test_multi_target_with_flags(self) -> None:
+        """rm -rf a b approved -> check must match only with same flags."""
+        cache = IntentApprovalCache()
+        cache.record("rm -rf /a /b")
+        assert cache.check("rm -rf /a /b") is True
+        assert cache.check("rm /a /b") is False
+        assert cache.check("rm -f /a /b") is False
+
+    def test_separator_with_flags(self) -> None:
+        """rm -rf /a approved ; rm /b not approved independently (same as before)."""
+        cache = IntentApprovalCache()
+        cache.record("rm /a")
+        assert cache.check("rm /a") is True
+        assert cache.check("rm -rf /a") is False  # flag bypass blocked
+

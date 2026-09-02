@@ -61,6 +61,12 @@ _EXEC_TOOL_TIMEOUT_PADDING = _APPROVAL_RETRY_WAIT_SECONDS + 5.0
 _DEFAULT_BACKGROUND_TIMEOUT = 1800.0
 _MAX_BACKGROUND_TIMEOUT = 3600.0
 _BACKGROUND_TERMINATE_TIMEOUT = 1.0
+
+# Max retained stdout bytes per background session before truncation.
+# Background processes may run up to one hour; capping output prevents
+# unbounded memory growth while we continue draining the pipe so the
+# child process does not block.
+_BG_OUTPUT_MAX_CHARS = 100_000
 _BACKGROUND_KILL_TIMEOUT = 1.0
 _EXEC_TERMINATE_TIMEOUT = 0.25
 _EXEC_KILL_TIMEOUT = 0.25
@@ -101,6 +107,7 @@ class _BgSession:
     agent_id: str | None = None
     local_urls: list[str] = field(default_factory=list)
     output_lines: list[str] = field(default_factory=list)
+    output_truncated: bool = False
     done: bool = False
     timed_out: bool = False
     killed: bool = False
@@ -476,6 +483,7 @@ def _bg_session_payload(session: _BgSession) -> dict[str, object]:
         "ended_at": session.ended_at,
         "killed": session.killed,
         "timed_out": session.timed_out,
+        "output_truncated": session.output_truncated,
     }
     if session.local_urls:
         payload["local_urls"] = list(session.local_urls)
@@ -562,8 +570,24 @@ async def _read_bg_output(session: _BgSession) -> None:
     stdout = session.process.stdout
     if stdout is None:
         return
+    total = 0
     while chunk := await stdout.read(4096):
-        session.output_lines.append(chunk.decode("utf-8", errors="replace"))
+        decoded = chunk.decode("utf-8", errors="replace")
+        total += len(decoded)
+        if session.output_truncated:
+            # Already capped — keep draining the pipe, don't retain.
+            continue
+        if total <= _BG_OUTPUT_MAX_CHARS:
+            session.output_lines.append(decoded)
+        else:
+            # This chunk pushes us over the cap. Append only up to the cap.
+            allowed = _BG_OUTPUT_MAX_CHARS - (total - len(decoded))
+            if allowed > 0:
+                session.output_lines.append(decoded[:allowed])
+            session.output_lines.append(
+                f"\n[output truncated after {_BG_OUTPUT_MAX_CHARS} chars]\n"
+            )
+            session.output_truncated = True
 
 
 def _finalize_bg_session(session: _BgSession) -> None:
@@ -1148,6 +1172,7 @@ async def process(
                 "offset": start,
                 "limit": max_chars,
                 "truncated": start > 0 or end < len(output),
+                "output_truncated": session.output_truncated,
             }
         )
 

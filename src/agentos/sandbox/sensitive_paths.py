@@ -384,9 +384,7 @@ def sensitive_target_in_command(
     if effective_workspace is None:
         effective_workspace = cwd if cwd is not None else Path.cwd()
 
-    for _kind, target in _extract_intents(command, base_dir=effective_workspace):
-        if _is_root_target(target):
-            return _ROOT_TARGET_MARKER
+    for _kind, _flags, target in _extract_intents(command, base_dir=effective_workspace):
         marker = sensitive_path_marker(target, workspace=effective_workspace)
         if marker is not None:
             return marker

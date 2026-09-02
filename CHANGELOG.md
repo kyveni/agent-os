@@ -33,6 +33,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Background process (`background_process`/`process`) now caps retained stdout
+  at 100K chars per session, preventing unbounded memory growth from noisy
+  child processes. The pipe is still drained after the cap so children do not
+  block. Truncation is surfaced via `output_truncated` in session payloads and
+  log responses (#803).
+
+- Intent cache now includes normalized flags in the cache key so
+  approving `rm /tmp/a` no longer implicitly approves `rm -rf /tmp/a`,
+  preventing flag-bypass escalation (#849).
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —
