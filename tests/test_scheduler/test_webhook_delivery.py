@@ -256,16 +256,16 @@ class _RecordingAsyncClient:
 async def test_deliver_webhook_posts_json_with_bearer(monkeypatch) -> None:
     _RecordingAsyncClient.instances.clear()
 
-    class _FakeHttpx:
-        AsyncClient = _RecordingAsyncClient
-
-    monkeypatch.setitem(__import__("sys").modules, "httpx", _FakeHttpx)
+    monkeypatch.setattr(
+        "agentos.tools.ssrf_client.ssrf_guarded_client",
+        lambda *a, **kw: _RecordingAsyncClient(timeout=None),
+    )
 
     chain = DeliveryChain()
     status = await chain._deliver_webhook(
-        _webhook_job("https://hooks.example/cron", token="abc"),
-        text="summary text",
-    )
+            _webhook_job("https://hooks.example/cron", token="abc"),
+            text="summary text",
+        )
     assert status == "delivered"
     assert _RecordingAsyncClient.instances, "AsyncClient was not constructed"
     inst = _RecordingAsyncClient.instances[-1]
@@ -281,10 +281,10 @@ async def test_deliver_webhook_posts_json_with_bearer(monkeypatch) -> None:
 async def test_deliver_webhook_omits_authorization_when_no_token(monkeypatch) -> None:
     _RecordingAsyncClient.instances.clear()
 
-    class _FakeHttpx:
-        AsyncClient = _RecordingAsyncClient
-
-    monkeypatch.setitem(__import__("sys").modules, "httpx", _FakeHttpx)
+    monkeypatch.setattr(
+        "agentos.tools.ssrf_client.ssrf_guarded_client",
+        lambda *a, **kw: _RecordingAsyncClient(timeout=None),
+    )
 
     chain = DeliveryChain()
     status = await chain._deliver_webhook(
@@ -309,11 +309,12 @@ async def test_deliver_webhook_returns_failed_on_http_error(monkeypatch, no_back
 
             return _Resp()
 
-    class _FakeHttpx:
-        AsyncClient = _ErrorClient
-
-    monkeypatch.setitem(__import__("sys").modules, "httpx", _FakeHttpx)
     _RecordingAsyncClient.instances.clear()
+
+    monkeypatch.setattr(
+        "agentos.tools.ssrf_client.ssrf_guarded_client",
+        lambda *a, **kw: _ErrorClient(timeout=None),
+    )
 
     chain = DeliveryChain()
     status = await chain._deliver_webhook(
@@ -336,7 +337,7 @@ def no_backoff():
 
 
 def _scripted_httpx(monkeypatch, responses):
-    """Install a fake ``httpx`` whose POSTs replay ``responses`` in order."""
+    """Install a fake ``ssrf_guarded_client`` whose POSTs replay ``responses`` in order."""
 
     class _ScriptedClient(_RecordingAsyncClient):
         async def post(self, url, json=None, headers=None):
@@ -346,11 +347,11 @@ def _scripted_httpx(monkeypatch, responses):
                 raise item
             return item
 
-    class _FakeHttpx:
-        AsyncClient = _ScriptedClient
-
-    monkeypatch.setitem(__import__("sys").modules, "httpx", _FakeHttpx)
     _RecordingAsyncClient.instances.clear()
+    monkeypatch.setattr(
+        "agentos.tools.ssrf_client.ssrf_guarded_client",
+        lambda *a, **kw: _ScriptedClient(timeout=None),
+    )
 
 
 def _webhook_response(status_code: int, headers: dict | None = None) -> httpx.Response:
