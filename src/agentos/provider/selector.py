@@ -262,8 +262,14 @@ class ModelSelector:
         self._index = self._first_admitted_index(start)
         return _build_provider(self._chain[self._index])
 
-    def override_model(self, model: str) -> None:
-        """Update the model on the primary provider config (for runtime switching)."""
+    def override_model(self, model: str, fallbacks: list[ProviderConfig] | None = None) -> None:
+        """Update the model on the primary provider config (for runtime switching).
+
+        When *fallbacks* are provided the entire chain is rebuilt with the
+        routed model as the primary followed by the tier fallbacks, so
+        ``_SelectorFallbackProvider`` can cascade through alternative tiers
+        when the primary times out. Existing ``_chain[1:]`` is discarded.
+        """
         if model and model != self._chain[0].model:
             self._chain[0] = ProviderConfig(
                 provider=self._chain[0].provider,
@@ -274,6 +280,8 @@ class ModelSelector:
                 proxy=self._chain[0].proxy,
                 provider_routing=self._chain[0].provider_routing,
             )
+        if fallbacks is not None:
+            self._chain = [self._chain[0], *fallbacks]
 
     def sync_primary(self, cfg: ProviderConfig) -> None:
         """Replace the primary provider config for future resolves and clones."""
