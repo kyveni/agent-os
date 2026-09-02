@@ -171,6 +171,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   dirty until a retry succeeds. The initial `start()` pass re-enqueues too,
   where `_mtimes` is empty and the watcher diff could never have recovered the
   path (#638).
+- `list_dir` no longer crashes with `FileNotFoundError` when the directory
+  contains a dangling/broken symlink — the tool now silently skips entries
+  whose `stat()` or `resolve()` fails.
+  ([#844](https://github.com/use-agent-os/agent-os/issues/844))
 
 ### Security
 

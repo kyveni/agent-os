@@ -918,13 +918,19 @@ async def list_dir(path: str) -> str:
             if marker is not None:
                 blocked_entries.append(marker)
                 continue
-            if _is_sensitive_access_path(entry.resolve(strict=False), workspace=workspace_root):
+            try:
+                if _is_sensitive_access_path(entry.resolve(strict=False), workspace=workspace_root):
+                    continue
+            except (OSError, FileNotFoundError):
                 continue
-            if entry.is_dir():
-                dirs.append(f"[dir]  {entry.name}/")
-            else:
-                size = entry.stat().st_size
-                files.append(f"[file] {entry.name} ({size} bytes)")
+            try:
+                if entry.is_dir():
+                    dirs.append(f"[dir]  {entry.name}/")
+                else:
+                    size = entry.stat().st_size
+                    files.append(f"[file] {entry.name} ({size} bytes)")
+            except (OSError, FileNotFoundError):
+                continue
         return dirs + files + blocked_entries
 
     entries = await loop.run_in_executor(None, _list)
