@@ -207,8 +207,7 @@ class MemorySyncManager:
         if reason == "session-delta" or (
             is_search_reason
             and session_delta_pending
-            and self._session_indexer is not None
-            and not session_sync_failed
+            and (self._session_indexer is None or not session_sync_failed)
         ):
             self._delta.reset()
 
