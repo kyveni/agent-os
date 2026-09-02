@@ -82,7 +82,7 @@ def test_agent_fallback_retries_timeout_code_when_message_is_sparse() -> None:
         raw_code="timeout",
     )
 
-    assert kind is ProviderErrorKind.TRANSPORT_TRANSIENT
+    assert kind is ProviderErrorKind.TRANSPORT_TIMEOUT
     assert policy.should_retry(kind, attempt=0) is True
 
 

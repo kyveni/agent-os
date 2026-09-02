@@ -360,7 +360,7 @@ class _FakeSelectorClone:
         self.provider = provider
         self.override_calls: list[str] = []
 
-    def override_model(self, model: str) -> None:
+    def override_model(self, model: str, **kwargs: object) -> None:
         self.override_calls.append(model)
         self.provider._model = model
 
@@ -377,7 +377,7 @@ class _FakeProviderSelector:
     def clone(self) -> _FakeSelectorClone:
         return self.clone_instance
 
-    def override_model(self, model: str) -> None:
+    def override_model(self, model: str, **kwargs: object) -> None:
         self.override_calls.append(model)
 
     def resolve(self) -> _FakeCompactionProvider:

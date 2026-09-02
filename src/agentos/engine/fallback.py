@@ -15,6 +15,7 @@ class ProviderErrorKind(StrEnum):
     OVERLOADED = "overloaded"
     CONTEXT_OVERFLOW = "context_overflow"
     TRANSPORT_TRANSIENT = "transport_transient"
+    TRANSPORT_TIMEOUT = "transport_timeout"
     EMPTY_RESPONSE = "empty_response"
     UNKNOWN = "unknown"
 
@@ -27,6 +28,33 @@ _FAILURE_KIND_MAP: dict[ProviderFailureKind, ProviderErrorKind] = {
     ProviderFailureKind.CONTEXT_OVERFLOW: ProviderErrorKind.CONTEXT_OVERFLOW,
     ProviderFailureKind.EMPTY_RESPONSE: ProviderErrorKind.EMPTY_RESPONSE,
 }
+
+
+def is_transport_timeout(
+    provider_name: str,
+    status_code: int | None,
+    raw_code: str = "",
+    message: str = "",
+) -> bool:
+    """Return True when the error is a hard transport timeout as opposed to a
+    transient blip (overloaded, 5xx, gateway error).
+
+    Distinguishes timeouts from generic transport errors so the retry policy
+    can cap timeout retries at 1 — retrying a hanging endpoint three times
+    at 120s each is not a retry strategy.
+    """
+    code = (raw_code or "").strip().lower()
+    msg = (message or "").strip().lower()
+    text = f"{code} {msg}"
+    if code == "timeout" or code == "522":
+        return True
+    if "timeout" in text and "timed out" in text:
+        return True
+    if status_code == 522:
+        return True
+    if status_code == 524:
+        return True
+    return False
 
 
 @dataclass
@@ -47,6 +75,10 @@ class FallbackPolicy:
         raw_code: str = "",
     ) -> ProviderErrorKind:
         """Classify a provider error message into a retry category."""
+        # Check for hard timeout first — a timeout is TRANSPORT_TIMEOUT
+        # regardless of how classify_provider_error categorises it.
+        if is_transport_timeout(provider_name, status_code, raw_code=raw_code, message=message):
+            return ProviderErrorKind.TRANSPORT_TIMEOUT
         kind = classify_provider_error(
             provider_name,
             status_code,
@@ -61,6 +93,10 @@ class FallbackPolicy:
             return False
         if kind == ProviderErrorKind.AUTH_FAILURE:
             return False  # Don't retry auth errors
+        if kind == ProviderErrorKind.TRANSPORT_TIMEOUT:
+            # A hard timeout means the endpoint is unhealthy — retrying the
+            # same endpoint three times at 120s each is not a retry strategy.
+            return attempt < 1
         retryable = (
             ProviderErrorKind.RATE_LIMIT,
             ProviderErrorKind.OVERLOADED,

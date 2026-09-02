@@ -144,6 +144,7 @@ from agentos.provider import (
 )
 from agentos.provider import (
     ProviderFailureKind,
+    ProviderHeartbeatEvent,
     ProviderRecoveryAction,
     classify_provider_error,
     decide_recovery_action,
@@ -443,6 +444,54 @@ def _provider_for_tier(tiers: object, tier_name: str) -> str:
     if not isinstance(tiers, Mapping) or not tier_name:
         return ""
     return str(_tier_value(tiers.get(tier_name), "provider", "") or "").strip()
+
+
+def _derive_tier_fallbacks(
+    router_cfg: Any,
+    current_model: str,
+    selector: Any,
+) -> list[Any] | None:
+    """Build a prioritised fallback chain from router tiers, excluding the
+    currently-routed model and any image-only tiers.
+
+    Returns ``None`` when the router has no tiers configured, so the caller can
+    treat ``None`` and ``[]`` the same way (no change to the selector).
+    """
+    tiers: Any = getattr(router_cfg, "tiers", None)
+    if not tiers:
+        return None
+
+    from agentos.provider.selector import ProviderConfig
+
+    fallbacks: list[ProviderConfig] = []
+    sorted_tiers = sorted(
+        [(tier_id, cfg) for tier_id, cfg in tiers.items()],
+        key=lambda t: _tier_index_for_sort(t[0], t[1]),
+    )
+
+    for _tier_id, tier_cfg in sorted_tiers:
+        if bool(_tier_value(tier_cfg, "image_only", False)):
+            continue
+        provider = str(_tier_value(tier_cfg, "provider", "") or "").strip()
+        model = str(_tier_value(tier_cfg, "model", "") or "").strip()
+        if not provider or not model or model == current_model:
+            continue
+        fallbacks.append(ProviderConfig(provider=provider, model=model))
+
+    return fallbacks or None
+
+
+def _tier_index_for_sort(tier_id: str, tier_cfg: object) -> int:
+    """Return a sort key for router tiers text-tiers first, then other tiers."""
+    from agentos.router_tiers import (
+        TEXT_TIERS,
+        normalize_text_tier,
+    )
+
+    normalized = normalize_text_tier(tier_id)
+    if normalized and normalized in TEXT_TIERS:
+        return TEXT_TIERS.index(normalized)
+    return 999
 
 
 def _select_savings_baseline_model(
@@ -1159,65 +1208,101 @@ class _SelectorFallbackProvider:
         recorded_success = False
         recorded_failure = False
         pre_text_buffer: list[Any] = []
+        llm_timeout: float = getattr(config, "timeout", 120.0) if config is not None else 120.0
 
         def drain_pre_text_buffer() -> list[Any]:
             drained = list(pre_text_buffer)
             pre_text_buffer.clear()
             return drained
 
-        async for event in self._provider.chat(messages, tools=tools, config=config):
-            if emitted_user_visible_content:
-                yield event
-                continue
+        try:
+            async with asyncio.timeout(llm_timeout):
+                async for event in self._provider.chat(messages, tools=tools, config=config):
+                    if emitted_user_visible_content:
+                        yield event
+                        continue
 
-            if isinstance(event, ProviderErrorEvent):
-                saw_provider_error = True
-                kind = _classify_provider_event(self.provider_name, event)
-                if not recorded_failure:
-                    # One vote per stream: a provider that emits several error
-                    # events for one request is still a single failed turn.
-                    recorded_failure = trips_breaker(kind)
-                    self._record_failure(kind, event.message)
-                if _kind_uses_selector_fallback(kind):
-                    try:
-                        self._provider = self._selector.next_fallback_after_failure(
-                            RuntimeError(event.message)
-                        )
-                    except Exception:
+                    if isinstance(event, ProviderErrorEvent):
+                        saw_provider_error = True
+                        kind = _classify_provider_event(self.provider_name, event)
+                        if not recorded_failure:
+                            # One vote per stream: a provider that emits several error
+                            # events for one request is still a single failed turn.
+                            recorded_failure = trips_breaker(kind)
+                            self._record_failure(kind, event.message)
+                        if _kind_uses_selector_fallback(kind):
+                            try:
+                                self._provider = self._selector.next_fallback_after_failure(
+                                    RuntimeError(event.message)
+                                )
+                            except Exception:
+                                for buffered_event in drain_pre_text_buffer():
+                                    yield buffered_event
+                                yield event
+                                return
+                            async for fallback_event in self._fallback_chat(
+                                messages, tools, config,
+                            ):
+                                yield fallback_event
+                            return
                         for buffered_event in drain_pre_text_buffer():
                             yield buffered_event
                         yield event
-                        return
-                    async for fallback_event in self._fallback_chat(messages, tools, config):
-                        yield fallback_event
-                    return
-                for buffered_event in drain_pre_text_buffer():
-                    yield buffered_event
-                yield event
-                continue
+                        continue
 
-            if _is_non_empty_provider_text_delta(event):
-                for buffered_event in drain_pre_text_buffer():
-                    yield buffered_event
-                emitted_user_visible_content = True
-                if not recorded_success:
-                    recorded_success = True
-                    self._record_success()
-                yield event
-                continue
+                    if _is_non_empty_provider_text_delta(event):
+                        for buffered_event in drain_pre_text_buffer():
+                            yield buffered_event
+                        emitted_user_visible_content = True
+                        if not recorded_success:
+                            recorded_success = True
+                            self._record_success()
+                        yield event
+                        continue
 
-            if getattr(event, "kind", "") == "done":
-                for buffered_event in drain_pre_text_buffer():
-                    yield buffered_event
-                # A clean stream proves the provider is healthy — including a
-                # tool-use-only turn that never emits user-visible text.
-                if not saw_provider_error and not recorded_success:
-                    recorded_success = True
-                    self._record_success()
-                yield event
-                continue
+                    if getattr(event, "kind", "") == "done":
+                        for buffered_event in drain_pre_text_buffer():
+                            yield buffered_event
+                        # A clean stream proves the provider is healthy — including a
+                        # tool-use-only turn that never emits user-visible text.
+                        if not saw_provider_error and not recorded_success:
+                            recorded_success = True
+                            self._record_success()
+                        yield event
+                        continue
 
-            pre_text_buffer.append(event)
+                    pre_text_buffer.append(event)
+        except TimeoutError:
+            # The LLM endpoint silently hung (no bytes, no error events).
+            # Record failure and attempt selector tier fallback.
+            if not recorded_failure:
+                self._record_failure(ProviderFailureKind.TRANSPORT_TRANSIENT, "llm_timeout")
+            if self._selector.has_fallback():
+                try:
+                    self._provider = self._selector.next_fallback()
+                except IndexError:
+                    for buffered_event in drain_pre_text_buffer():
+                        yield buffered_event
+                    yield ProviderHeartbeatEvent(
+                        phase="llm_fallback",
+                        message="Model timed out; no further fallback tiers available.",
+                    )
+                    # Re-raise to let the agent retry loop emit the timeout envelope
+                    raise
+                yield ProviderHeartbeatEvent(
+                    phase="llm_fallback",
+                    message=(
+                        f"Model {getattr(self._provider, 'provider_name', '') or ''} timed out; "
+                        f"switching to fallback model "
+                        f"{self._selector._chain[self._selector._index].model}."
+                    ),
+                )
+                async for fallback_event in self._fallback_chat(messages, tools, config):
+                    yield fallback_event
+                return
+            for buffered_event in drain_pre_text_buffer():
+                yield buffered_event
+            raise
 
         for buffered_event in drain_pre_text_buffer():
             yield buffered_event
@@ -4633,7 +4718,14 @@ class TurnRunner:
 
         # Apply routed model back to cloned selector (local, not shared)
         if turn.model and cloned_selector is not None:
-            cloned_selector.override_model(turn.model)
+            # Derive tier fallbacks from router config so the selector can
+            # cascade through alternative tiers when the routed model hangs.
+            tier_fallbacks: list[Any] | None = None
+            if router_cfg:
+                tier_fallbacks = _derive_tier_fallbacks(
+                    router_cfg, turn.model, cloned_selector
+                )
+            cloned_selector.override_model(turn.model, fallbacks=tier_fallbacks)
             provider = cloned_selector.resolve()
 
         return turn, provider

@@ -106,7 +106,7 @@ class _SelectorClone:
     def __init__(self, provider: _ArtifactProvider) -> None:
         self.provider = provider
 
-    def override_model(self, model: str) -> None:
+    def override_model(self, model: str, **kwargs: object) -> None:
         self.current_config = SimpleNamespace(model=model)
         self.provider.model = model
 

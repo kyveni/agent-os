@@ -72,7 +72,7 @@ class _FakeSelector:
     def resolve(self) -> _ToolLoopProvider:
         return self.provider
 
-    def override_model(self, model: str) -> None:
+    def override_model(self, model: str, **kwargs: object) -> None:
         self.current_config.model = model
 
 

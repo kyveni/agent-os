@@ -77,7 +77,7 @@ class _SelectorClone:
         self.provider = provider
         self.current_config = SimpleNamespace(model=provider.model)
 
-    def override_model(self, model: str) -> None:
+    def override_model(self, model: str, **kwargs: object) -> None:
         self.current_config = SimpleNamespace(model=model)
         self.provider.model = model
 

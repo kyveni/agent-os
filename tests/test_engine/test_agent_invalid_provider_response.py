@@ -80,7 +80,7 @@ class _SelectorClone:
     def resolve(self) -> _SequenceProvider:
         return self.provider
 
-    def override_model(self, model: str) -> None:
+    def override_model(self, model: str, **kwargs: object) -> None:
         self.current_config.model = model
 
     def next_fallback_after_failure(self, primary_failure: Exception) -> _SequenceProvider:

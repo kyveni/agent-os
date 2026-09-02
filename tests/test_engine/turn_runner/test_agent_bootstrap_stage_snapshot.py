@@ -59,7 +59,7 @@ class _StubSelector:
     def clone(self):
         return self
 
-    def override_model(self, model: str) -> None:
+    def override_model(self, model: str, **kwargs: object) -> None:
         self.overridden_models.append(model)
 
     def resolve(self):

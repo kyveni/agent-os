@@ -163,7 +163,7 @@ class _StubSelector:
     def current_config(self):
         return SimpleNamespace(model=self.current_model)
 
-    def override_model(self, model: str) -> None:
+    def override_model(self, model: str, **kwargs: object) -> None:
         self.overridden_models.append(model)
 
     def resolve(self):

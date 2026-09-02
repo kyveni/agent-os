@@ -212,7 +212,7 @@ class _Selector:
     def clone(self) -> _Selector:
         return self
 
-    def override_model(self, model: str) -> None:
+    def override_model(self, model: str, **kwargs: object) -> None:
         self.current_config = SimpleNamespace(model=model)
 
     def resolve(self) -> _DoneProvider:
