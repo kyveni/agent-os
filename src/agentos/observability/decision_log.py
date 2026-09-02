@@ -276,7 +276,10 @@ def load_entries(path: Path) -> list[DecisionEntry]:
         line = line.strip()
         if not line:
             continue
-        payload = json.loads(line)
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
         payload = _coerce_decision_payload(payload)
         steps_payload = payload.pop("pipeline_steps", [])
         steps = [

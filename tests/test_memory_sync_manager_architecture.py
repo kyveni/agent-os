@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from agentos.memory.sync_manager import MemorySyncManager
+from agentos.memory.sync_manager import FileSyncFailures, MemorySyncManager
 
 
 class NoopStore:
@@ -107,9 +107,9 @@ async def test_sync_force_overrides_search_clean_fast_path(tmp_path):
     first_count = len(store.indexed)
     sync_calls: list[dict[str, object]] = []
 
-    async def fake_do_file_sync(**kwargs: object) -> set[str]:
+    async def fake_do_file_sync(**kwargs: object) -> FileSyncFailures:
         sync_calls.append(kwargs)
-        return set()
+        return FileSyncFailures()
 
     manager._do_file_sync = fake_do_file_sync  # type: ignore[method-assign]
     await manager.sync(reason="search")

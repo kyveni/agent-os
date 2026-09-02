@@ -310,7 +310,11 @@ async def _fetch_image_url(url: str) -> tuple[bytes, str]:
                 location = resp.headers.get("location")
                 await resp.aclose()
                 if not location:
-                    break
+                    # A redirect with no Location is a dead end: nothing to
+                    # follow, and the body was just closed. Falling through
+                    # leaves the reader on a closed 3xx stream, which reports
+                    # httpx's generic error instead of the hop that broke.
+                    raise ToolError(f"Redirect response from {current_url} missing Location header")
                 current_url = urljoin(str(resp.url), location)
             else:
                 raise ToolError(f"Too many redirects (>{_MAX_REDIRECTS})")

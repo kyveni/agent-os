@@ -108,6 +108,11 @@ Providers with two-factor authentication normally require an app password
 rather than the account password. Set `smtp_ssl=true` (and `smtp_port=465`)
 for implicit TLS; the default is STARTTLS on port 587.
 
+`imap_folder` picks the mailbox to poll and defaults to `INBOX`. Names with
+spaces (`Sent Items`, `Archive 2026`) are quoted per RFC 3501 before they go on
+the wire, so they need no quoting of your own; a name carrying a control
+character is rejected at channel start rather than at poll time.
+
 ### Access Control
 
 `allowed_senders` is a fail-closed From-address allowlist and is **required** —
@@ -238,7 +243,10 @@ Request URL. It requires the bot token (`xoxb-...`) plus an app-level token
 (`xapp-...`) saved as `app_token`.
 
 Slack webhook mode uses the Events API Request URL. It requires the bot token
-plus `signing_secret`, and the gateway must be reachable by Slack.
+plus `signing_secret`, and the gateway must be reachable by Slack. The secret
+is mandatory, not advisory: without it the endpoint answers Slack's
+`url_verification` handshake and rejects everything else with `401`, because an
+unsigned POST cannot be attributed to Slack.
 
 Leave `slack_channel_id` empty when the adapter should reply to the incoming
 conversation. Set it only when you want a default fallback channel. Enable

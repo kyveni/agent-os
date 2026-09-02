@@ -229,7 +229,10 @@ async def test_log_format_regex() -> None:
 
 @pytest.mark.asyncio
 async def test_agentos_queue_depth_multi_session_total() -> None:
-    """agentos_queue_depth emits total pending queue depth across all sessions."""
+    """agentos_queue_depth emits total pending queue depth across all sessions.
+
+    Also verifies the gauge decrements to 0 when all tasks finish.
+    """
     gate = asyncio.Event()
 
     async def _blocking_handler(_run: Any) -> None:
@@ -255,10 +258,33 @@ async def test_agentos_queue_depth_multi_session_total() -> None:
         await rt.wait(h3.task_id, timeout=2.0)
 
     qd_events = [e for e in captured if e.get("metric") == "agentos_queue_depth"]
-    assert len(qd_events) == 3
-    # First enqueue: 1 pending on sess-a (total=1)
-    assert qd_events[0]["value"] == 1
-    # Second enqueue: task-1 running, task-2 pending on sess-a (total=1)
-    assert qd_events[1]["value"] == 1
-    # Third enqueue: task-2 pending on sess-a, task-3 pending on sess-b (total=2)
-    assert qd_events[2]["value"] == 2
+    assert len(qd_events) >= 3
+    # Now _remove_pending also emits, so we get more events.
+    # Verify the pattern: first event should be 1, last event should be 0.
+    assert qd_events[0]["value"] == 1, "enqueue h1 should show depth=1"
+    # Peaks at depth=2 (h2 + h3 pending)
+    assert any(e["value"] == 2 for e in qd_events), "expected peak depth of 2"
+    # Ends at 0 after all tasks complete
+    assert qd_events[-1]["value"] == 0, "final depth should be 0"
+
+
+@pytest.mark.asyncio
+async def test_agentos_queue_depth_decrements_to_zero() -> None:
+    """agentos_queue_depth should reach 0 once all tasks complete."""
+    rt = _make_runtime(max_concurrency=2)
+    env = _make_envelope("agent-1::sess-depth-zero")
+
+    with _capture_metric_logs() as captured:
+        h1 = await rt.enqueue(env, "task-a")
+        h2 = await rt.enqueue(env, "task-b")
+        await rt.wait(h1.task_id, timeout=2.0)
+        await rt.wait(h2.task_id, timeout=2.0)
+
+    qd_events = [e for e in captured if e.get("metric") == "agentos_queue_depth"]
+    # Expect at least 4 events: enqueue h1 (1), enqueue h2 (2),
+    # _mark_running for h1 (1), and final _mark_terminal for h2 (0)
+    assert len(qd_events) >= 4
+    # The very last event must be 0 (queue empty)
+    assert qd_events[-1]["value"] == 0, (
+        f"Final agentos_queue_depth should be 0, got {qd_events[-1]['value']}"
+    )

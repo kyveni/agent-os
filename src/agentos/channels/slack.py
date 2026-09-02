@@ -66,6 +66,24 @@ FATAL_ERROR_CLASSES: tuple[str, ...] = (
 )
 
 
+def _unsigned_url_verification_challenge(body: bytes, headers: Mapping[str, str]) -> str | None:
+    """Return the challenge of an unsigned ``url_verification`` request.
+
+    ``None`` means the request is anything else and must be rejected when no
+    signing secret is configured.
+    """
+    if headers.get("content-type", "").startswith("application/x-www-form-urlencoded"):
+        return None
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict) or data.get("type") != "url_verification":
+        return None
+    challenge = data.get("challenge", "")
+    return challenge if isinstance(challenge, str) else ""
+
+
 class SlackAuthError(Exception):
     """Raised when Slack token validation fails."""
 
@@ -727,8 +745,10 @@ class SlackChannel:
         """Handle an incoming Slack Events API request."""
         body = await request.body()
 
-        # Signature verification
-        if self.signing_secret is not None:
+        # Signature verification. A blank secret is treated as no secret: an
+        # empty HMAC key is one anybody can compute with, so it would verify
+        # forged requests rather than reject them.
+        if self.signing_secret:
             timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
             signature = request.headers.get("X-Slack-Signature", "")
 
@@ -742,22 +762,21 @@ class SlackChannel:
             if not self._verify_signature(body, timestamp, signature):
                 return Response(status_code=401)
         else:
-            content_type = request.headers.get("content-type", "")
-            if content_type.startswith("application/x-www-form-urlencoded"):
-                import urllib.parse
-
-                try:
-                    decoded_body = body.decode("utf-8")
-                except UnicodeDecodeError:
-                    decoded_body = ""
-                parsed = urllib.parse.parse_qs(decoded_body)
-                if "payload" in parsed:
-                    log.warning("slack.webhook_blocked_unsigned_form")
-                    return Response(
-                        "Slack signing secret required for interactive payloads",
-                        status_code=401,
-                    )
+            # Fail closed. Without a signing secret nothing about this request
+            # can be attributed to Slack, so an unauthenticated caller could
+            # forge events, slash commands, or interactive payloads. The one
+            # exception is the ``url_verification`` handshake: it only echoes a
+            # challenge back and has no side effects, so an operator can still
+            # pass Slack's endpoint check while wiring the secret up.
+            challenge = _unsigned_url_verification_challenge(body, request.headers)
+            if challenge is None:
+                log.warning("slack.webhook_unsigned_rejected")
+                return Response(
+                    "Slack signing secret required",
+                    status_code=401,
+                )
             log.warning("slack.webhook_no_signing_secret")
+            return JSONResponse({"challenge": challenge})
 
         content_type = request.headers.get("content-type", "")
         if content_type.startswith("application/x-www-form-urlencoded"):
@@ -987,14 +1006,14 @@ class SlackChannel:
 
     def _verify_signature(self, body: bytes, timestamp: str, signature: str) -> bool:
         """Verify Slack request signature using HMAC-SHA256."""
-        if self.signing_secret is None:
+        if not self.signing_secret:
             return False
-        sig_basestring = f"v0:{timestamp}:{body.decode()}"
+        sig_basestring = b"v0:" + timestamp.encode() + b":" + body
         expected = (
             "v0="
             + hmac.HMAC(
                 self.signing_secret.encode(),
-                sig_basestring.encode(),
+                sig_basestring,
                 hashlib.sha256,
             ).hexdigest()
         )

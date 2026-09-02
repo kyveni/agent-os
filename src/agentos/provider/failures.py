@@ -109,6 +109,17 @@ def _is_policy_refusal(text: str) -> bool:
             "moderation",
             "refusal",
             "blocked by policy",
+            # Azure OpenAI / OpenAI error code and finish_reason
+            "content_filter",
+            # e.g. "flagged by content filter"
+            "content filter",
+            # Azure responsible AI policy code
+            "responsible_ai_policy",
+            # Azure OpenAI canonical phrasing; "content" and "policy" are not
+            # adjacent here, so "content policy" above does not cover it
+            "content management policy",
+            # Google Gemini block reason
+            "blocked by safety",
         )
     )
 
