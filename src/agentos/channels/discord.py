@@ -308,8 +308,10 @@ class DiscordChannel:
 
     async def _do_reconnect(self) -> None:
         log.info("discord.reconnecting", session_id=self._state.session_id)
+        current = asyncio.current_task()
         if self._heartbeat_task is not None:
-            self._heartbeat_task.cancel()
+            if self._heartbeat_task is not current:
+                self._heartbeat_task.cancel()
             self._heartbeat_task = None
         await self._close_ws()
 
@@ -762,8 +764,10 @@ class DiscordChannel:
     async def stop(self) -> None:
         """Disconnect from gateway and clean up."""
         self._connected = False
+        current = asyncio.current_task()
         if self._heartbeat_task is not None:
-            self._heartbeat_task.cancel()
+            if self._heartbeat_task is not current:
+                self._heartbeat_task.cancel()
             self._heartbeat_task = None
         if self._dispatch_task is not None:
             self._dispatch_task.cancel()

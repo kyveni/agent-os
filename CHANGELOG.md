@@ -67,6 +67,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Discord heartbeat timeout no longer cancels its own reconnect —
+  `_do_reconnect` now guards `self._heartbeat_task.cancel()` with
+  `asyncio.current_task()` so a heartbeat timeout that triggers a
+  reconnect does not schedule a `CancelledError` against the running
+  task, aborting the new socket before it is established.
+  ([#882](https://github.com/use-agent-os/agent-os/issues/882))
+
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —
