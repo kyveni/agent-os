@@ -67,6 +67,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Fixed ``parse_version`` so that ``.dev`` without a number is
+  treated as ``dev=0`` (not ``None``/final), and ``sort_key`` uses
+  ``float('inf')`` for missing dev so that ``rc1.dev1 < rc1`` per
+  PEP 440.
+  ([#830](https://github.com/use-agent-os/agent-os/issues/830))
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —
