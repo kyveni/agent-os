@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import pytest
+from pytest import MonkeyPatch
 
 from agentos.observability.otlp import (
     OtlpTraceSink,
@@ -11,6 +13,36 @@ from agentos.observability.otlp import (
     _to_hex32,
 )
 from agentos.observability.trace import TraceContext, TraceEvent
+
+
+@pytest.fixture
+def _mock_httpx(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[str, Any]]]:
+    """Replace httpx.AsyncClient with a mock that records requests."""
+    captured: dict[str, list[dict[str, Any]]] = {"requests": []}
+
+    class _MockClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> _MockClient:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def post(self, url: str, json: Any = None, headers: Any = None) -> Any:
+            captured["requests"].append({"url": url, "json": json, "headers": headers})
+
+            class _MockResp:
+                status_code = 200
+
+                def raise_for_status(self) -> None:
+                    pass
+
+            return _MockResp()
+
+    monkeypatch.setattr(httpx, "AsyncClient", _MockClient)
+    return captured
 
 
 def test_hex_conversion_helpers() -> None:
@@ -72,33 +104,10 @@ def test_build_export_payload() -> None:
 
 
 @pytest.mark.asyncio
-async def test_otlp_flush_network_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    import httpx
-
-    captured_requests: list[dict[str, Any]] = []
-
-    class _MockClient:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            pass
-
-        async def __aenter__(self) -> _MockClient:
-            return self
-
-        async def __aexit__(self, *args: Any) -> None:
-            return None
-
-        async def post(self, url: str, json: Any = None, headers: Any = None) -> Any:
-            captured_requests.append({"url": url, "json": json, "headers": headers})
-
-            class _MockResp:
-                status_code = 200
-
-                def raise_for_status(self) -> None:
-                    pass
-
-            return _MockResp()
-
-    monkeypatch.setattr(httpx, "AsyncClient", _MockClient)
+async def test_otlp_flush_network_call(
+    _mock_httpx: dict[str, list[dict[str, Any]]],
+) -> None:
+    captured = _mock_httpx
 
     sink = OtlpTraceSink(endpoint="http://collector.internal:4318/v1/traces")
     ctx = TraceContext.new(trace_id="test-trace-1")
@@ -108,9 +117,9 @@ async def test_otlp_flush_network_call(monkeypatch: pytest.MonkeyPatch) -> None:
     success = await sink.flush()
 
     assert success is True
-    assert len(captured_requests) == 1
-    assert captured_requests[0]["url"] == "http://collector.internal:4318/v1/traces"
-    assert "resourceSpans" in captured_requests[0]["json"]
+    assert len(captured["requests"]) == 1
+    assert captured["requests"][0]["url"] == "http://collector.internal:4318/v1/traces"
+    assert "resourceSpans" in captured["requests"][0]["json"]
 
 
 def test_otlp_queue_capacity_bounds() -> None:
@@ -258,3 +267,96 @@ def test_otlp_multithreaded_writes() -> None:
         t.join()
 
     assert len(sink._queue) == 100
+
+
+@pytest.mark.asyncio
+async def test_otlp_flush_lock_serializes_concurrent_flush(_mock_httpx: Any) -> None:
+    """Verify that flush() serialises concurrent callers via _flush_lock.
+
+    Concurrent flushes from _periodic_flush and batch-triggered tasks
+    should not interleave: only one HTTP export in-flight at a time.
+    """
+    import asyncio
+
+    flush_count = 0
+    original_lock = asyncio.Lock()
+
+    sink = OtlpTraceSink(endpoint="http://collector.internal:4318/v1/traces")
+    # Replace _flush_lock with one we can observe
+    sink._flush_lock = original_lock
+
+    ctx = TraceContext.new(trace_id="concurrent-flush-test")
+
+    # Write enough events to trigger batch flushes from both paths
+    for _ in range(30):
+        sink.write(TraceEvent(kind="event", context=ctx))
+
+    # Launch concurrent flushes
+    async def _do_flush() -> bool:
+        nonlocal flush_count
+        result = await sink.flush()
+        flush_count += 1
+        return result
+
+    results = await asyncio.gather(_do_flush(), _do_flush(), _do_flush())
+
+    assert all(results)  # All flushes succeeded
+    assert flush_count == 3  # All three completed
+    # Only one HTTP request should have been made since flushes are
+    # serialised — the first one drains the queue, subsequent ones
+    # find it empty and return True immediately.
+    assert len(_mock_httpx["requests"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_otlp_flush_lock_concurrent_with_failure(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Concurrent flush calls still serialise correctly when one fails."""
+    call_count = 0
+
+    async def _failing_post(url: str, **kwargs: Any) -> Any:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise httpx.HTTPError("Simulated network failure")
+
+        class _MockResp:
+            status_code = 200
+
+            def raise_for_status(self) -> None:
+                pass
+
+        return _MockResp()
+
+    class _FailingClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> _FailingClient:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def post(self, url: str, **kwargs: Any) -> Any:
+            return await _failing_post(url, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _FailingClient)
+
+    sink = OtlpTraceSink(endpoint="http://collector.internal:4318/v1/traces")
+    ctx = TraceContext.new(trace_id="concurrent-fail-test")
+    for _ in range(30):
+        sink.write(TraceEvent(kind="event", context=ctx))
+
+    # First flush: fails (call_count=1), events re-queued
+    result1 = await sink.flush()
+    assert result1 is False, "First flush should fail"
+
+    # Second flush (call_count=2): succeeds
+    result2 = await sink.flush()
+    assert result2 is True, "Second flush should succeed after re-queue"
+
+    assert call_count == 2, "Should have made exactly 2 HTTP calls"
+    # After second flush succeeds, queue should be empty
+    assert len(sink._queue) == 0

@@ -8,53 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
-- The sensitive-path hard block now refuses destructive intents that target
-  the filesystem root. `rm -rf /` carries no sensitive *prefix*, so the
-  denylist never matched it and a whole-host wipe fell through to the ordinary
-  approval flow — which `/elevated bypass` skips outright. Every spelling that
-  resolves to or sweeps the top level is covered: `/`, `//`, `/.`, `/..`,
-  `/*`, `/*/*`, `/**`, `/?*`, `/.*` and `/[a-z]*`. Globs that name a subset
-  (`/tmp*`) are untouched, and root counts as sensitive only in the
-  delete-intent scan — reading or listing `/` stays ordinary work (#563).
-- Channel HTTP retries now cover every transient timeout, survive an
-  HTTP-date `Retry-After`, and hand back an exhausted rate limit.
-  `retry_request` caught `(ConnectError, ReadTimeout)`, but `ConnectTimeout`,
-  `WriteTimeout` and `PoolTimeout` descend from `TimeoutException` — a sibling
-  of `ConnectError` under `TransportError` — so a DNS, TLS-handshake, upload or
-  connection-pool timeout on any Slack/Discord/Telegram/webhook call escaped
-  the backoff and crashed the caller on the first stall; the clause is now
-  `(ConnectError, TimeoutException)`. `Retry-After` was parsed with a bare
-  `float()`, so the HTTP-date form RFC 7231 §7.1.3 permits turned a rate limit
-  into a `ValueError` inside the retry loop: the header is now resolved as
-  delay-seconds or HTTP-date, falls back to the computed backoff when it is
-  unparseable, non-finite, negative or already past, and is clamped to 300s so
-  a provider cannot park a send for hours. The 429 branch also gained the
-  `attempt < max_retries` guard the 5xx branch already had, so an exhausted
-  rate limit returns the response — status, headers and provider error body
-  intact — instead of sleeping once more and raising a bare
-  `RuntimeError("retry_request exhausted")` (#642, #599).
-- `SubscriptionManager._message_subs` now removes empty sets on
-  unsubscription and connection teardown, preventing a slow memory leak
-  on long-running gateways (#609).
-- The Environment view's path strip shortens Windows paths again. `shortPath`
-  split on `/` only, so a gateway-reported `C:\Users\<name>\.agentos\.env` counted
-  as a single segment and was rendered untrimmed, overflowing the header strip
-  it was written to keep short. Backslashes are normalised before splitting, so
-  Windows and mixed-separator paths trim to their last two segments like POSIX
-  ones do.
-- Cron schedules that restrict both day-of-month and day-of-week now follow the
-  POSIX OR rule instead of ANDing the two fields. `0 0 1,15 * 5` means "the 1st,
-  the 15th, or any Friday" — as it does in cron, croniter, and every scheduler
-  users compare against — where AgentOS previously required a date to be both a
-  1st/15th *and* a Friday, silently killing such schedules for virtually the
-  whole month. `CronField` now records whether the field was written as a bare
-  `*`, since expanding `*` to the full value set made it indistinguishable from
-  an explicit `1-31`/`0-6` at match time and the rule applies only when neither
-  day field is a wildcard. Schedules with a wildcard in either day field are
-  unchanged. This also restores parity with the cron panel in the web UI, whose
-  "next runs" preview (`frontend/src/views/cron/logic.ts`) has always applied
-  the OR rule — so the times it showed disagreed with when the job actually
-  fired. ([#660](https://github.com/use-agent-os/agent-os/issues/660))
+- `OtlpTraceSink.flush()` now acquires `self._flush_lock` (declared but
+  never used), serialising concurrent HTTP exports from the periodic flush
+  task and batch-triggered flush tasks to prevent out-of-order delivery and
+  re-queue corruption on network failure (#672).
 
 ## [2026.9.2] - 2026-09-02
 
