@@ -67,6 +67,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- TaskRuntime no longer evicts the routing envelope of a session
+  that still has pending work, ensuring follow-up messages (send)
+  retain channel routing metadata.
+  ([#930](https://github.com/use-agent-os/agent-os/issues/930))
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —
