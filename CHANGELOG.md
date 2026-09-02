@@ -33,6 +33,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **`load_entries` skips corrupted JSONL lines** — `json.loads` is wrapped in try/except so partial or malformed lines are silently skipped instead of crashing downstream tools. Closes #812.
+
+- ``list_dir`` no longer crashes with ``FileNotFoundError`` when encountering
+  dangling/broken symlinks; such entries are now skipped gracefully.
+
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —

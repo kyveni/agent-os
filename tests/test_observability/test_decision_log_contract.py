@@ -128,3 +128,29 @@ def test_decision_log_round_trips_daily_notes_policy(tmp_path) -> None:
     assert loaded[0].daily_notes_omitted is True
     assert loaded[0].daily_notes_count_before_omit == 3
     assert loaded[0].daily_notes_policy_reason == "auto_injection_disabled"
+def test_load_entries_skips_corrupted_jsonl(tmp_path) -> None:
+    """Corrupted or partial JSONL lines are skipped, not crashing the loader."""
+    log_file = tmp_path / "decisions-test.jsonl"
+    valid_line = json.dumps({
+        "turn_id": "turn-1",
+        "session_key": "agent:main:test",
+        "prompt_hash": "a" * 64,
+        "system_prompt_hash": "b" * 64,
+        "tool_list_hash": "c" * 64,
+        "tool_choice": "auto",
+        "tokens_input": 10,
+        "tokens_output": 5,
+        "model": "fake-model",
+        "provider": "fake",
+        "latency_ms": 3,
+        "ts": "2026-09-02T00:00:00Z",
+    })
+    log_file.write_text(
+        valid_line + "\n"
+        + "{corrupted partial\n"
+        + "not even json at all\n"
+        + valid_line + "\n",
+        encoding="utf-8",
+    )
+    entries = load_entries(log_file)
+    assert len(entries) == 2
