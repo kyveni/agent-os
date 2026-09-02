@@ -138,3 +138,28 @@ def test_sensitive_reads_in_a_later_segment_are_blocked_at_the_tool_boundary() -
         sensitive_path_in_text("rm /tmp/ok; cat /root/.bash_history", workspace=workspace)
         == "/root"
     )
+
+
+def test_sensitive_path_blocks_root_filesystem() -> None:
+    """Issue #563: ``rm -rf /``, ``rm -rf /*``, and ``rm -rf /.`` must
+    be blocked by the hard block (sensitive_target_in_command) because
+    ``/`` is not covered by _SENSITIVE_PREFIXES like ``/etc`` or ``/root``."""
+    workspace = Path("/workspace")
+
+    for cmd in [
+        "rm -rf /",
+        "rm -rf /*",
+        "rm -rf /.",
+        "rm -rf / .",
+    ]:
+        result = sensitive_target_in_command(cmd, workspace=workspace)
+        assert result == "/", f"Expected '/' marker for {cmd!r}, got {result!r}"
+
+
+def test_sensitive_path_is_path_root() -> None:
+    """Issue #563: ``is_sensitive_path`` must return ``'/'`` for root
+    filesystem references."""
+    for path in ("/", "/*", "/."):
+        assert (
+            is_sensitive_path(path) == "/"
+        ), f"Expected '/' for {path!r}, got {is_sensitive_path(path)!r}"

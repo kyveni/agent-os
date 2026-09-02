@@ -139,7 +139,21 @@ def is_sensitive_path(path: str) -> str | None:
         return None
     if not path:
         return None
+
+    # Root filesystem /, /*, and /.  are critical and must never slip.
+    # Check BEFORE any path resolution because on Windows Path('/').resolve()
+    # returns 'C:\' (drive root), not '/' (#563).
+    raw = str(path).strip()
+    root_markers = ("/", "/*", "/.", "//", "///")
+    if raw in root_markers or raw.replace("\\", "/") in root_markers:
+        return "/"
+
     candidates = _comparison_path_candidates(path)
+
+    # Also check after normalization (catches '' from empty-after-strip)
+    for expanded in candidates:
+        if expanded == "":
+            return "/"
     for expanded in candidates:
         if (
             expanded == "/root/.ssh"

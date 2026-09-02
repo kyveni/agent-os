@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `is_sensitive_path` now returns ``"/"`` for root filesystem references
+  (``/``, ``/*``, ``/.``), fixing ``rm -rf /`` and variants slipping past
+  the hard block (P0, #563).
+
 ## [2026.9.2] - 2026-09-02
 
 ### Added
