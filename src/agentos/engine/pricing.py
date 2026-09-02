@@ -616,14 +616,9 @@ _LEGACY_PRICING_PREFIXES: list[tuple[str, PriceEntry]] = [
     ("doubao-seed-1-6-thinking", PriceEntry(0.60, 2.40)),
     ("doubao-seed-1-6", PriceEntry(0.30, 1.20)),
     # DeepSeek.
-    ("deepseek/deepseek-r1", PriceEntry(0.70, 2.50, 0.14)),  # 80% cache hit
-    ("deepseek/deepseek-v3", PriceEntry(0.26, 0.38, 0.026)),  # 90% cache hit
-    ("deepseek/deepseek-chat", PriceEntry(0.14, 0.28, 0.014)),  # 90% cache hit
-    # Bare DeepSeek IDs (direct provider endpoints).
-    ("deepseek-r1", PriceEntry(0.70, 2.50)),
-    ("deepseek-v3", PriceEntry(0.26, 0.38)),
-    ("deepseek-chat", PriceEntry(0.14, 0.28, 0.014)),  # 90% cache hit discount
-    ("deepseek-reasoner", PriceEntry(0.70, 2.50, 0.14)),  # 80% cache hit discount
+    ("deepseek/deepseek-r1", PriceEntry(0.70, 2.50)),
+    ("deepseek/deepseek-v3", PriceEntry(0.26, 0.38)),
+    ("deepseek/deepseek-chat", PriceEntry(0.14, 0.28)),
     # OpenAI (OpenRouter prices).
     ("openai/gpt-4.1-mini", PriceEntry(0.40, 1.60)),
     ("openai/gpt-4.1", PriceEntry(2.0, 8.0)),
@@ -631,32 +626,30 @@ _LEGACY_PRICING_PREFIXES: list[tuple[str, PriceEntry]] = [
     ("openai/gpt-4o", PriceEntry(2.50, 10.0)),
     ("openai/text-embedding-3-small", PriceEntry(0.02, 0.0)),
     ("openai/text-embedding-3-large", PriceEntry(0.13, 0.0)),
-    ("gpt-4o-mini", PriceEntry(0.15, 0.60, 0.075)),  # 50% cached prompt discount
-    ("gpt-4o", PriceEntry(2.50, 10.0, 1.25)),  # 50% cached prompt discount
+    ("gpt-4o-mini", PriceEntry(0.15, 0.60)),
+    ("gpt-4o", PriceEntry(2.50, 10.0)),
     ("text-embedding-3-small", PriceEntry(0.02, 0.0)),
     ("text-embedding-3-large", PriceEntry(0.13, 0.0)),
     ("gpt-4-turbo", PriceEntry(10.0, 30.0)),
     ("gpt-4-", PriceEntry(30.0, 60.0)),
-    ("o3-mini", PriceEntry(1.10, 4.40, 0.55)),  # 50% cached prompt discount
-    ("o1-mini", PriceEntry(3.0, 12.0, 1.50)),  # 50% cached prompt discount
-    ("o1", PriceEntry(15.0, 60.0, 7.50)),  # 50% cached prompt discount
+    ("o3-mini", PriceEntry(1.10, 4.40)),
+    ("o1-mini", PriceEntry(3.0, 12.0)),
+    ("o1", PriceEntry(15.0, 60.0)),
     # Anthropic Claude.
     ("anthropic/claude-opus-4.8", PriceEntry(5.0, 25.0)),
     ("anthropic/claude-opus-4.7", PriceEntry(5.0, 25.0)),
     ("anthropic/claude-opus-4.5", PriceEntry(5.0, 25.0)),
     ("anthropic/claude-opus-4", PriceEntry(15.0, 75.0)),
     ("anthropic/claude-sonnet-4", PriceEntry(3.0, 15.0)),
-    ("anthropic/claude-3-5-sonnet", PriceEntry(3.0, 15.0, 0.30)),  # 90% cache read
-    ("anthropic/claude-3-5-haiku", PriceEntry(0.80, 4.0, 0.08)),  # 90% cache read
-    ("anthropic/claude-3-opus", PriceEntry(15.0, 75.0)),
+    ("anthropic/claude-3-5-sonnet", PriceEntry(3.0, 15.0)),
+    ("anthropic/claude-3-5-haiku", PriceEntry(0.80, 4.0)),
     ("anthropic/claude-3-opus", PriceEntry(15.0, 75.0)),
     ("anthropic/claude-3-sonnet", PriceEntry(3.0, 15.0)),
     ("anthropic/claude-3-haiku", PriceEntry(0.25, 1.25)),
     ("claude-opus-4", PriceEntry(15.0, 75.0)),
     ("claude-sonnet-4", PriceEntry(3.0, 15.0)),
-    ("claude-3-5-sonnet", PriceEntry(3.0, 15.0, 0.30)),  # 90% cache read
-    ("claude-3-5-haiku", PriceEntry(0.80, 4.0, 0.08)),  # 90% cache read
-    ("claude-3-opus", PriceEntry(15.0, 75.0)),
+    ("claude-3-5-sonnet", PriceEntry(3.0, 15.0)),
+    ("claude-3-5-haiku", PriceEntry(0.80, 4.0)),
     ("claude-3-opus", PriceEntry(15.0, 75.0)),
     ("claude-3-sonnet", PriceEntry(3.0, 15.0)),
     ("claude-3-haiku", PriceEntry(0.25, 1.25)),
@@ -664,11 +657,6 @@ _LEGACY_PRICING_PREFIXES: list[tuple[str, PriceEntry]] = [
     ("google/gemini-2.5-flash", PriceEntry(0.15, 0.60)),
     ("google/gemini-2.5-pro", PriceEntry(1.25, 10.0)),
     ("google/gemini-2.0-flash", PriceEntry(0.10, 0.40)),
-    # Bare Gemini IDs (direct provider endpoints).
-    ("gemini-2.5-pro", PriceEntry(1.25, 10.0)),
-    ("gemini-2.5-flash", PriceEntry(0.15, 0.60)),
-    ("gemini-2.0-flash", PriceEntry(0.10, 0.40)),
-    ("gemini-1.5-pro", PriceEntry(1.25, 10.0)),
     # Alibaba Cloud Model Studio / DashScope, Chinese Mainland (Beijing).
     # OpenAI-compatible Chat Completions returns token usage, not billed cost.
     # These prices are used only for AgentOS estimates and must not be
@@ -695,16 +683,13 @@ _PRICING_TABLE: list[tuple[str, PriceEntry]] = [
 
 _DEFAULT_PRICING = PriceEntry(3.0, 15.0)
 
-# Snapshot/date-suffix patterns to strip from model IDs for static pricing
-# lookup.  Providers frequently publish dated snapshots (e.g.
-# claude-3-7-sonnet-20250219, gpt-4o-2024-08-06) that differ only in suffix.
+# Snapshot/date-suffix regex for normalizing model IDs.
+# Providers publish dated snapshots (claude-3-7-sonnet-20250219,
+# gpt-4o-2024-08-06) that differ only in the date suffix.
 _SNAPSHOT_SUFFIX_RE = re.compile(
     r"-(20\d{2})"
     r"(?:-?(?:0[1-9]|1[0-2])-?(?:0[1-9]|[12]\d|3[01]))"
 )
-# Vendor-prefix patterns to accept bare IDs from direct provider endpoints.
-# When a provider_id is supplied, bare IDs are also checked with the vendor
-# prefix prepended.
 _DIRECT_VENDOR_PREFIXES: dict[str, str] = {
     "deepseek": "deepseek/",
     "google": "google/",
@@ -716,37 +701,29 @@ _DIRECT_VENDOR_PREFIXES: dict[str, str] = {
 def _normalize_model_candidates(model_id: str, provider_id: str = "") -> list[str]:
     """Generate candidate model IDs for static pricing lookup.
 
-    Handles:
-      - Bare IDs without vendor prefix: e.g. ``deepseek-chat`` -> also try
-        ``deepseek/deepseek-chat`` if provider hints at DeepSeek.
-      - Snapshot suffix stripping: ``claude-3-7-sonnet-20250219`` -> try
-        ``claude-3-7-sonnet``.
-      - Vendor prefix stripping: ``anthropic/claude-3-7-sonnet`` -> also try
-        ``claude-3-7-sonnet``.
-
-    Returns candidates in priority order (highest-priority first).
+    Resolves bare IDs, snapshot suffixes, and vendor prefixes so existing
+    pricing entries match even for non-canonical model ID formats.
     """
     model_id = model_id.strip()
     candidates: list[str] = [model_id]
     model_lower = model_id.lower()
 
-    # Strip vendor prefix (e.g. "anthropic/claude-..." -> "claude-...").
+    # Strip vendor prefix (anthropic/claude-3-5-sonnet -> claude-3-5-sonnet).
     for _vendor, prefix in _DIRECT_VENDOR_PREFIXES.items():
         if model_lower.startswith(prefix):
             stripped = model_id[len(prefix):]
             candidates.append(stripped)
             break
 
-    # Strip snapshot suffix (e.g. "claude-3-7-sonnet-20250219" -> "claude-3-7-sonnet").
-    # Apply to the original AND any prefix-stripped candidates.
+    # Strip snapshot suffix from all candidates.
     for c in list(candidates):
-        suffix_match = _SNAPSHOT_SUFFIX_RE.search(c)
-        if suffix_match:
-            stripped_suffix = c[:suffix_match.start()]
-            if stripped_suffix not in candidates:
-                candidates.append(stripped_suffix)
+        m = _SNAPSHOT_SUFFIX_RE.search(c)
+        if m:
+            sc = c[:m.start()]
+            if sc not in candidates:
+                candidates.append(sc)
 
-    # If this looks like a direct-provider bare ID without prefix, try with prefix.
+    # If bare ID with provider hint, try prefixed version.
     if provider_id:
         pv = provider_id.strip().lower()
         if pv in _DIRECT_VENDOR_PREFIXES:
@@ -754,8 +731,7 @@ def _normalize_model_candidates(model_id: str, provider_id: str = "") -> list[st
             if prefixed not in candidates:
                 candidates.append(prefixed)
     else:
-        # No provider_id — check if bare ID matches a known vendor:
-        # try both prefix and vendor-scoped versions.
+        # No provider_id — check if bare ID looks like a vendor prefix, try with that prefix.
         for vendor_key, prefix in _DIRECT_VENDOR_PREFIXES.items():
             if model_lower.startswith(vendor_key):
                 prefixed = prefix + model_id
@@ -765,6 +741,26 @@ def _normalize_model_candidates(model_id: str, provider_id: str = "") -> list[st
 
     return candidates
 
+
+def _lookup_static_price(model_id: str, provider_id: str = "") -> PriceEntry:
+    override = _lookup_price_override(model_id)
+    if override is not None:
+        return override
+    model_lower = model_id.lower()
+    for prefix, entry in _PRICING_TABLE:
+        if model_lower.startswith(prefix):
+            return entry
+
+    # Candidate normalization: try stripped/alias candidates.
+    if model_id.strip():
+        for candidate in _normalize_model_candidates(model_id, provider_id):
+            if candidate != model_id:
+                cl = candidate.lower()
+                for prefix, entry in _PRICING_TABLE:
+                    if cl.startswith(prefix):
+                        return entry
+
+    return _DEFAULT_PRICING
 
 
 def _log_opencap_static_fallback(model_id: str) -> None:
@@ -781,28 +777,6 @@ def _should_fetch_live_price(model_id: str) -> bool:
     if model_lower.startswith(("baai/", "sentence-transformers/", "ollama/", "local/")):
         return False
     return True
-
-
-def _lookup_static_price(model_id: str, provider_id: str = "") -> PriceEntry:
-    """Look up a model's static pricing, falling back to normalized candidates."""
-    override = _lookup_price_override(model_id)
-    if override is not None:
-        return override
-    model_lower = model_id.lower()
-    for prefix, entry in _PRICING_TABLE:
-        if model_lower.startswith(prefix):
-            return entry
-
-    # Candidate normalization: try snapshot-stripped, prefix-stripped, etc.
-    if model_id.strip():
-        for candidate in _normalize_model_candidates(model_id, provider_id):
-            if candidate != model_id:
-                cl = candidate.lower()
-                for prefix, entry in _PRICING_TABLE:
-                    if cl.startswith(prefix):
-                        return entry
-
-    return _DEFAULT_PRICING
 
 
 def lookup_price(model_id: str, provider_id: str = "") -> PriceEntry:
