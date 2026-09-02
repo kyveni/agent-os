@@ -118,6 +118,7 @@ _QUOTE_MARKERS: tuple[re.Pattern[str], ...] = (
 _HTML_BREAK_RE = re.compile(r"(?i)<\s*(?:br\s*/?|/p|/div|/tr|/li)\s*>")
 _HTML_DROP_RE = re.compile(r"(?is)<\s*(script|style)\b.*?<\s*/\s*\1\s*>")
 _HTML_TAG_RE = re.compile(r"(?s)<[^>]+>")
+_HEADER_COMMENT_RE = re.compile(r"\([^()]*\)")
 _DEFAULT_OUTBOUND_SUBJECT = "Message from AgentOS"
 
 
@@ -208,6 +209,27 @@ def sender_allowed(sender: str, allowlist: list[str] | tuple[str, ...]) -> bool:
     return False
 
 
+def _quote_imap_mailbox(folder: str) -> str:
+    """Return ``folder`` as an RFC 3501 quoted-string for ``SELECT``.
+
+    ``imaplib`` splices command arguments onto the wire verbatim, so a name
+    with a space in it — ``Sent Items`` and friends are ordinary on
+    Exchange/Outlook — arrives as two tokens and the server answers ``BAD``.
+    RFC 3501 4.3 escapes only ``\\`` and ``"`` inside a quoted-string;
+    control characters cannot appear at all, and a bare CR/LF would end the
+    command line and let the tail of the name run as a second IMAP command, so
+    those are refused rather than escaped.
+    """
+
+    name = folder or ""
+    if not name.strip():
+        raise ValueError("email channel imap_folder must not be empty")
+    if any(char < " " or char == "\x7f" for char in name):
+        raise ValueError(f"email channel imap_folder must not contain control characters: {name!r}")
+    escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def decode_header_value(value: str | None) -> str:
     """Decode an RFC 2047 header into text, degrading to the raw value."""
 
@@ -249,12 +271,12 @@ def strip_quoted_reply(body: str) -> str:
 def thread_key_for(parsed: EmailMessage) -> str:
     """Return the stable thread id for an inbound message."""
 
-    references = (parsed.get("References") or "").split()
+    references = _message_ids(parsed.get("References"))
     if references:
-        return references[0].strip().strip("<>")
-    in_reply_to = (parsed.get("In-Reply-To") or "").strip()
+        return references[0]
+    in_reply_to = _message_ids(parsed.get("In-Reply-To"))
     if in_reply_to:
-        return in_reply_to.strip("<>")
+        return in_reply_to[0]
     return (parsed.get("Message-ID") or "").strip().strip("<>")
 
 
@@ -389,6 +411,9 @@ class EmailChannel:
                 "email channel requires a non-empty allowed_senders allowlist; "
                 "an open inbox would let any stranger drive the agent"
             )
+        # Surface an unusable folder name here instead of as an opaque server
+        # ``BAD`` once every poll interval.
+        _quote_imap_mailbox(self.config.imap_folder)
         if not self.config.imap_ssl:
             log.warning("email.imap_plaintext", name=self.config.name)
         if not (self.config.smtp_ssl or self.config.smtp_starttls):
@@ -465,7 +490,7 @@ class EmailChannel:
 
         client = self._imap_connect()
         try:
-            client.select(self.config.imap_folder)
+            client.select(_quote_imap_mailbox(self.config.imap_folder))
             status, data = client.search(None, "UNSEEN")
             if status != "OK":
                 raise RuntimeError(f"IMAP search failed: {status}")
@@ -833,10 +858,30 @@ def _body_text(parsed: EmailMessage) -> str:
 
 
 def _merge_references(parsed: EmailMessage, message_id: str) -> str:
-    existing = (parsed.get("References") or "").split()
-    if message_id:
-        existing.append(f"<{message_id}>")
-    return " ".join(dict.fromkeys(existing))
+    """Build the ``References`` chain a reply to ``parsed`` must carry.
+
+    RFC 5322 3.6.4: the reply repeats the parent's ``References`` and appends the
+    parent's ``Message-ID``. A parent that carries no ``References`` -- the second
+    message of a thread in most mail clients -- keeps the thread root in
+    ``In-Reply-To``, so fall back to it or the root is lost for good.
+    """
+
+    chain = _message_ids(parsed.get("References")) or _message_ids(parsed.get("In-Reply-To"))
+    own = message_id.strip().strip("<>")
+    if own:
+        chain.append(own)
+    return " ".join(f"<{ref}>" for ref in dict.fromkeys(chain))
+
+
+def _message_ids(raw: Any) -> list[str]:
+    """Return the bare message ids in a threading header value, in order.
+
+    Clients decorate these headers with comments and drop the angle brackets, so
+    a plain ``split()`` yields tokens that are not ids at all.
+    """
+
+    text = _HEADER_COMMENT_RE.sub(" ", str(raw or ""))
+    return [token for token in (raw_id.strip().strip("<>") for raw_id in text.split()) if token]
 
 
 def _first_literal(data: Any) -> bytes | None:

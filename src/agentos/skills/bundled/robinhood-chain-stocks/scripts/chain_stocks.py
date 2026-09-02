@@ -24,6 +24,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 CHAIN_ID = 4663
@@ -391,6 +392,20 @@ def main() -> int:
     parser.add_argument("--rpc-url", default=DEFAULT_RPC_URL, help="Robinhood Chain JSON-RPC URL")
     parser.add_argument("--no-price", action="store_true", help="Skip the Chainlink price read")
     parser.add_argument("--timeout", type=float, default=15.0, help="HTTP timeout seconds")
+    parser.add_argument(
+        "--cards",
+        metavar="FILE",
+        help=(
+            "Where to write the Web-chat card artifact. Defaults to <symbol>.cards.json "
+            "in the working directory; the publish marker goes to stderr so stdout stays "
+            "pure JSON."
+        ),
+    )
+    parser.add_argument(
+        "--no-cards",
+        action="store_true",
+        help="Do not write the card artifact (JSON on stdout only).",
+    )
     args = parser.parse_args()
 
     if not args.query and not args.address:
@@ -424,6 +439,12 @@ def main() -> int:
     if listed is not None:
         state["name"] = _clean_name(str(listed.get("name", "")))
         state["symbol"] = symbol
+        # Display-only, and carried purely so the card renderer has a logo. It
+        # comes from the third-party token list, so the renderer restricts it to
+        # http(s) rather than trusting it.
+        logo = str(listed.get("logoURI", "") or "").strip()
+        if logo:
+            state["logoURI"] = logo
     if state.get("isStockToken") is False:
         state.setdefault("notes", []).append(
             "uiMultiplier() reverted: this address is not a Robinhood Stock Token"
@@ -442,8 +463,51 @@ def main() -> int:
         "token": state,
     }
     print(json.dumps(result, ensure_ascii=False))
+    if not args.no_cards:
+        _write_cards(result, args.cards or _default_cards_name(result))
     return 0
 
 
+def _default_cards_name(result: dict[str, Any]) -> str:
+    token = result.get("token")
+    symbol = ""
+    if isinstance(token, dict):
+        symbol = str(token.get("symbol") or token.get("onchainSymbol") or "")
+    slug = re.sub(r"[^A-Za-z0-9._-]", "", symbol) or "token"
+    return f"{slug}.cards.json"
+
+
+def _write_cards(result: dict[str, Any], output: str) -> None:
+    """Write the card artifact and announce it on **stderr**.
+
+    On by default rather than opt-in. Both were tried first and both failed the
+    same way: told to run a second piped command, or to pass a flag the docs put
+    in every example, the model ran the bare command anyway and answered with a
+    hand-written table. The only arrangement that actually renders is the one
+    that needs no decision from it at all.
+
+    stdout stays pure JSON so the reading itself is unchanged; ``exec_command``
+    merges stderr into the captured output, so the publish marker still reaches
+    the auto-publisher.
+
+    Never fatal -- a failed render must not cost the caller the reading it
+    already paid for.
+    """
+    try:
+        import chain_cards  # noqa: PLC0415 - sibling module, resolved at call time
+
+        payload = chain_cards.build_payload(result)
+        if not payload["cards"]:
+            return
+        Path(output).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        print(
+            f"publish_artifact path={output} mime={chain_cards.CARDS_MIME}",
+            file=sys.stderr,
+        )
+    except Exception as exc:  # noqa: BLE001 - reading already printed; never fail on the card
+        print(f"[card not written: {exc}]", file=sys.stderr)
+
+
 if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
     sys.exit(main())

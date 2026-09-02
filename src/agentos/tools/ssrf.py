@@ -148,7 +148,18 @@ def assert_address_allowed_for_fetch(
     The address-level half of :func:`validate_http_url_for_fetch`, split out so
     the connect-time guard in :mod:`agentos.tools.ssrf_client` applies the exact
     same policy to the address it is about to open a socket to.
+
+    The metadata floor is applied first. Fetch policy is a strict superset of
+    the metadata-only policy, but it used to derive that coverage from the
+    private/link-local ranges rather than from ``_METADATA_ADDRESSES`` itself —
+    so a metadata endpoint outside those ranges fell through. Alibaba Cloud's
+    ``100.100.100.200`` sits in CGNAT space (``100.64.0.0/10``), which is
+    neither private, loopback, link-local nor reserved, and was therefore
+    allowed by the *strict* guard while the permissive one blocked it. Deriving
+    the floor from the same set both guards share keeps them ordered correctly
+    for every address in it, including any added later.
     """
+    assert_address_not_metadata(hostname, addr)
     block_reason = _hard_block_reason(addr)
     if block_reason is not None:
         raise SSRFBlockedError(_blocked_message(hostname, addr, block_reason))
@@ -219,13 +230,24 @@ def validate_http_url_for_fetch(
     *,
     trusted_fake_ip_cidrs: Iterable[str] | None = None,
 ) -> None:
-    """Validate that an HTTP(S) URL does not resolve to a blocked address."""
+    """Validate that an HTTP(S) URL does not resolve to a blocked address.
+
+    Fetch policy is a strict superset of :func:`assert_not_metadata_endpoint`,
+    so the metadata hostname check runs here too: a resolver that answers
+    ``metadata.google.internal`` at all is answering for the credential
+    endpoint, whatever address it hands back.
+    """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise UnsupportedURLSchemeError("Only HTTP/HTTPS URLs are supported")
     hostname = parsed.hostname
     if not hostname:
         raise ValueError("Invalid URL: no hostname")
+    if is_metadata_hostname(hostname):
+        raise SSRFBlockedError(
+            f"Blocked request to {hostname}: cloud metadata endpoints serve instance "
+            "credentials and are never a valid agent target."
+        )
 
     try:
         infos = socket.getaddrinfo(hostname, None)

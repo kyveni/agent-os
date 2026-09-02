@@ -770,6 +770,14 @@ Supported transports are `stdio`, `sse`, and `streamable_http`. The MCP SDK is
 included in the standard AgentOS installation, so Streamable HTTP and OAuth work
 without installing an additional package extra.
 
+The HTTP transports accept `http://` and `https://` URLs only, and both connect
+through the same SSRF guard the built-in HTTP tools use. `http://localhost:PORT`
+and LAN-hosted servers keep working — the guard blocks cloud metadata endpoints
+(`169.254.169.254` and friends), which serve instance credentials and are never
+a valid MCP target. The check runs against the address the socket actually
+dials, so a short-TTL DNS name cannot answer safely for the check and with the
+metadata address for the connection.
+
 OAuth access and refresh tokens are not written to `config.toml`. AgentOS keeps
 them in a server-scoped JSON file under the configured state directory with
 file mode `0600` inside a `0700` directory on POSIX systems. On Windows, the

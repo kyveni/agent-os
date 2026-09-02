@@ -241,6 +241,116 @@ async def test_otlp_interval_flush(monkeypatch: pytest.MonkeyPatch) -> None:
     assert sink._flush_task is None
 
 
+@pytest.mark.asyncio
+async def test_otlp_concurrent_flush_serialized(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Concurrent flush() calls must serialize on _flush_lock.
+
+    Regression for #672: without the lock, two flush() coroutines could post
+    concurrently, delivering spans out of order and re-queueing the same
+    events twice on failure. With the lock, each flush drains the queue
+    exactly once and only one HTTP post is in flight at a time.
+    """
+    import asyncio
+    import time
+
+    import httpx
+
+    in_flight = 0
+    max_in_flight = 0
+    posts: list[tuple[int, float]] = []
+
+    class _MockClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> _MockClient:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def post(self, url: str, json: Any = None, headers: Any = None) -> Any:
+            nonlocal in_flight, max_in_flight
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            posts.append((time.monotonic_ns(), len(json["resourceSpans"])))
+            await asyncio.sleep(0.05)  # hold the lock open so overlap is visible
+
+            class _MockResp:
+                status_code = 200
+
+                def raise_for_status(self) -> None:
+                    pass
+
+            in_flight -= 1
+            return _MockResp()
+
+    monkeypatch.setattr(httpx, "AsyncClient", _MockClient)
+
+    sink = OtlpTraceSink(endpoint="http://collector.internal:4318/v1/traces")
+    ctx = TraceContext.new(trace_id="concurrent-flush-test")
+
+    # Fire several flushes concurrently when the queue already has events.
+    for i in range(10):
+        sink.write(TraceEvent(kind=f"ev_{i}", context=ctx))
+
+    results = await asyncio.gather(*[sink.flush() for _ in range(5)])
+
+    assert all(results), "every concurrent flush should report success"
+    assert max_in_flight == 1, (
+        "flush() calls must be serialized by _flush_lock; "
+        f"observed {max_in_flight} posts in flight"
+    )
+    assert sink._queue == [], "queue must be fully drained after serialized flush"
+
+
+@pytest.mark.asyncio
+async def test_otlp_concurrent_failed_flush_no_double_requeue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On failure, events must be re-queued exactly once, not per concurrent caller."""
+
+    import asyncio
+
+    import httpx
+
+    class _FailingClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> _FailingClient:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def post(self, url: str, json: Any = None, headers: Any = None) -> Any:
+            await asyncio.sleep(0.02)
+            raise httpx.ConnectError("collector unreachable")
+
+    monkeypatch.setattr(httpx, "AsyncClient", _FailingClient)
+
+    sink = OtlpTraceSink(
+        endpoint="http://collector.internal:4318/v1/traces",
+        max_queue_size=100,
+    )
+    ctx = TraceContext.new(trace_id="concurrent-fail-test")
+
+    for i in range(5):
+        sink.write(TraceEvent(kind=f"ev_{i}", context=ctx))
+
+    # With serialization, the first flush re-queues once; the remaining
+    # concurrent callers find an empty queue and return True (nothing to do).
+    # The bug being fixed: without the lock, every caller would have drained
+    # and re-queued the same 5 events, leaving duplicates in the queue.
+    results = await asyncio.gather(*[sink.flush() for _ in range(5)])
+    assert any(r is False for r in results), "at least one flush hit the failing export"
+    assert len(sink._queue) == 5, (
+        "events must be re-queued exactly once after concurrent failed flushes; "
+        f"queue now holds {len(sink._queue)} events"
+    )
+
+
 def test_otlp_multithreaded_writes() -> None:
     import threading
 

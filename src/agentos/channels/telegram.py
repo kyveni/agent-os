@@ -66,6 +66,10 @@ FATAL_ERROR_CLASSES: tuple[str, ...] = (
 _DEFAULT_TIMEOUT_S = 30.0
 _POLL_TIMEOUT_HEADROOM_S = 5.0
 _CONNECT_RETRY_DELAYS_S = (0.25, 0.5)
+#: Transport failures that happen before any request bytes are written, and so
+#: can be retried without risking a duplicate Bot API call.
+_PRE_SEND_CONNECT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
 #: ``TelegramApiError`` covers both "Telegram answered no" and "we never reached
 #: Telegram". These substrings mark the second kind, which is not a verdict on
 #: whatever was asked about — see :meth:`TelegramChannel.probe_target`.
@@ -514,7 +518,15 @@ class TelegramChannel:
                     request_kwargs["timeout"] = request_timeout
                 response = await client.post(f"/bot{self.config.token}/{method}", **request_kwargs)
                 break
-            except httpx.ConnectError:
+            except _PRE_SEND_CONNECT_ERRORS:
+                # Nothing reached Telegram yet — DNS/TLS never completed, or we
+                # never got a pooled connection to write to — so resending is
+                # safe. ConnectTimeout and PoolTimeout are TimeoutException
+                # siblings of ConnectError, not subclasses, so they have to be
+                # named here or they fall through to the generic branch below
+                # and fail on the first attempt. ReadTimeout deliberately stays
+                # out: by then the request is in flight, and re-sending a
+                # getUpdates long poll would double-poll it.
                 if retry_delay is None:
                     raise TelegramApiError(f"Telegram {method} connection failed") from None
                 log.warning(

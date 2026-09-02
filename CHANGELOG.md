@@ -6,6 +6,221 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Inline card grids in Web chat** — a second AgentOS-native artifact mime,
+  `application/vnd.agentos.cards+json`, alongside the existing chart one. A
+  skill publishes a JSON payload and the transcript renders a responsive grid of
+  record cards, each with an optional logo, a colour-coded status badge, and
+  per-field copy buttons — instead of a download chip.
+
+  This is the shape a markdown table handles badly: a 42-character contract
+  address forces the table into a horizontal scroll, while a card gives the
+  address its own line next to a copy button. `badgeTone` accepts
+  `positive`/`warning`/`danger`/`neutral` and falls back to `neutral` for
+  anything else, so a skill can introduce a new status without waiting on a
+  frontend release. At most 24 cards render and the remainder are counted and
+  reported under the grid rather than dropped silently.
+
+  Every payload string reaches the DOM through `textContent`, never
+  `innerHTML`, and `logo` is restricted to `http(s)` URLs — card fields carry
+  on-chain metadata, which is attacker-controlled on a permissionless chain.
+
+  `robinhood-rwa-addresses` is the first consumer: `scripts/rwa_cards.py` reads
+  the lookup's JSON on stdin and emits the artifact, so an address answer in the
+  Web UI arrives as a grid with the verification badge attached to each result.
+  `docs/artifacts-and-media.md` documents the payload.
+
+### Fixed
+
+- Serialize SessionStorage transactions with `asyncio.Lock()` to
+  prevent "cannot start a transaction within a transaction" errors
+  when `delete_session`, `delete_project`, or
+  `rewrite_compacted_session` run concurrently.
+  ([#891](https://github.com/use-agent-os/agent-os/issues/891))
+- Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
+  `ConnectError`. All three happen before any request bytes reach Telegram — a
+  DNS/TLS handshake that never completed, or a wait for a pooled connection —
+  but the two timeouts are `TimeoutException` siblings of `ConnectError` rather
+  than subclasses, so `TelegramChannel._api()` dropped them into its generic
+  `RequestError` branch and raised on the very first attempt with zero retries.
+  `ReadTimeout` stays out of the retry path on purpose: by then the request is
+  in flight, and re-sending a `getUpdates` long poll would double-poll it.
+  ([#651](https://github.com/use-agent-os/agent-os/issues/651))
+- **`robinhood-rwa-addresses` now verifies every address against Robinhood
+  Chain instead of trusting the token index.** The skill decided what counted
+  as a genuine Stock Token from a name suffix in CoinGecko's list, which was
+  wrong in both directions. CoinGecko caps `name` at 60 characters, so long
+  listings lost the "• Robinhood Token" marker mid-word and were dropped
+  entirely — `--query IBM` returned no matches at all, as did VTI, XLK, CTSH
+  and CRDO. In the other direction, 47 of the 238 entries the skill reported as
+  verified Stock Tokens (JPM, MCD, DIS, UBER, ABNB, PYPL and others) have **no
+  contract deployed at the advertised address**; the skill handed them out as
+  usable addresses, and funds sent to one would be unrecoverable.
+
+  Discovery still ranks candidates from the token list, but the answer is now
+  settled on chain: every genuine Stock Token is a proxy pointing at Robinhood's
+  shared EIP-1967 beacon `0xe10b6f6b275de231345c20d14ab812db62151b00`, which a
+  permissionless impersonator cannot forge. One batched JSON-RPC round-trip
+  (`https://rpc.mainnet.chain.robinhood.com`, no key, ~0.5s) classifies each
+  match as `verified`, `not-deployed`, `not-a-stock-token`, or `unverified`,
+  and a top-level `warning` carries the caveat. Undeployed listings are still
+  returned — silently dropping them reads as "the skill is broken" — but are
+  flagged and never presented as usable addresses.
+
+  Following `robinhood-chain-stocks`, an unreachable node yields `unverified`
+  rather than a negative verdict: a network fault is never reported as evidence
+  that a token is fake. `--no-verify` skips the check explicitly and says so in
+  its own wording, and `--rpc-url` points at an alternate node. The name-suffix
+  match is retained only as the offline fallback, now tolerant of truncation.
+
+- TaskRuntime queue depth gauge (`agentos_queue_depth`) now decrements when
+  tasks leave the pending queue, instead of staying stuck at the peak enqueue
+  value (#668).
+- The sensitive-path hard block now refuses destructive intents that target
+  the filesystem root. `rm -rf /` carries no sensitive *prefix*, so the
+  denylist never matched it and a whole-host wipe fell through to the ordinary
+  approval flow — which `/elevated bypass` skips outright. Every spelling that
+  resolves to or sweeps the top level is covered: `/`, `//`, `/.`, `/..`,
+  `/*`, `/*/*`, `/**`, `/?*`, `/.*` and `/[a-z]*`. Globs that name a subset
+  (`/tmp*`) are untouched, and root counts as sensitive only in the
+  delete-intent scan — reading or listing `/` stays ordinary work (#563).
+- The image tool now reports a redirect that carries no `Location` header
+  instead of the confusing failure it caused downstream. `_fetch_image_url`
+  follows redirects itself so every hop is re-validated against the SSRF guard;
+  a 3xx with no `Location` closed the response and fell out of the loop, so the
+  failure surfaced as httpx's generic `Failed to fetch image from URL: Redirect
+  response '302 Found' for url ...` (or a `StreamClosed` from reading the body
+  that had just been closed, depending on the httpx version) rather than the
+  dead-end hop that actually broke. It now raises `Redirect response from <url>
+  missing Location header`, naming the URL that returned it.
+- Channel HTTP retries now cover every transient timeout, survive an
+  HTTP-date `Retry-After`, and hand back an exhausted rate limit.
+  `retry_request` caught `(ConnectError, ReadTimeout)`, but `ConnectTimeout`,
+  `WriteTimeout` and `PoolTimeout` descend from `TimeoutException` — a sibling
+  of `ConnectError` under `TransportError` — so a DNS, TLS-handshake, upload or
+  connection-pool timeout on any Slack/Discord/Telegram/webhook call escaped
+  the backoff and crashed the caller on the first stall; the clause is now
+  `(ConnectError, TimeoutException)`. `Retry-After` was parsed with a bare
+  `float()`, so the HTTP-date form RFC 7231 §7.1.3 permits turned a rate limit
+  into a `ValueError` inside the retry loop: the header is now resolved as
+  delay-seconds or HTTP-date, falls back to the computed backoff when it is
+  unparseable, non-finite, negative or already past, and is clamped to 300s so
+  a provider cannot park a send for hours. The 429 branch also gained the
+  `attempt < max_retries` guard the 5xx branch already had, so an exhausted
+  rate limit returns the response — status, headers and provider error body
+  intact — instead of sleeping once more and raising a bare
+  `RuntimeError("retry_request exhausted")` (#642, #599).
+- The email channel can poll an IMAP folder whose name contains spaces.
+  `imap_folder` was handed to `imaplib` verbatim, and `imaplib` does not quote
+  mailbox arguments, so a folder such as `Sent Items` — ordinary on
+  Exchange/Outlook — went on the wire as two tokens and every poll failed with
+  an opaque `BAD [CLIENTBUG] Invalid syntax`. The name is now emitted as an
+  RFC 3501 quoted-string, escaping `\` and `"`, and a name carrying a control
+  character (a CR or LF would have ended the command line and run its tail as a
+  second IMAP command) is refused at channel start instead of at poll time.
+- `SubscriptionManager._message_subs` now removes empty sets on
+  unsubscription and connection teardown, preventing a slow memory leak
+  on long-running gateways (#609).
+- An email reply no longer drops the thread root when the inbound message
+  carries no `References` header. `_merge_references` read only `References`,
+  so for the second message of a thread — where most mail clients send
+  `In-Reply-To` alone — the parent id was discarded and the outgoing reply
+  referenced only itself, breaking the conversation apart in Gmail, Outlook and
+  Thunderbird. The chain now falls back to `In-Reply-To` when `References` is
+  absent, per RFC 5322 3.6.4. Both threading headers are now read by one
+  parser that drops comments and accepts ids with or without angle brackets,
+  and `thread_key_for` shares it, so the thread cache key and the reference
+  chain can no longer disagree about which message is the root (#620).
+- The Environment view's path strip shortens Windows paths again. `shortPath`
+  split on `/` only, so a gateway-reported `C:\Users\<name>\.agentos\.env` counted
+  as a single segment and was rendered untrimmed, overflowing the header strip
+  it was written to keep short. Backslashes are normalised before splitting, so
+  Windows and mixed-separator paths trim to their last two segments like POSIX
+  ones do.
+- Provider content-moderation blocks are classified as `POLICY_REFUSAL` again
+  instead of falling through to `BAD_REQUEST`/`UNKNOWN`. `_is_policy_refusal()`
+  held only generic phrasing, so the wording providers actually emit went
+  unmatched: Azure OpenAI's canonical *"triggering Azure OpenAI's content
+  management policy"* does not contain the adjacent words "content policy", the
+  OpenAI/Azure `content_filter` code and `finish_reason` matched nothing, and
+  Gemini's "blocked by safety" is not "safety policy". Since a refusal and a
+  malformed request map to different recovery actions, the misclassification
+  sent real policy blocks down the wrong path. Added `content_filter`,
+  `content filter`, `responsible_ai_policy`, `content management policy` and
+  `blocked by safety` (#629).
+
+- Cron schedules that restrict both day-of-month and day-of-week now follow the
+  POSIX OR rule instead of ANDing the two fields. `0 0 1,15 * 5` means "the 1st,
+  the 15th, or any Friday" — as it does in cron, croniter, and every scheduler
+  users compare against — where AgentOS previously required a date to be both a
+  1st/15th *and* a Friday, silently killing such schedules for virtually the
+  whole month. `CronField` now records whether the field was written as a bare
+  `*`, since expanding `*` to the full value set made it indistinguishable from
+  an explicit `1-31`/`0-6` at match time and the rule applies only when neither
+  day field is a wildcard. Schedules with a wildcard in either day field are
+  unchanged. This also restores parity with the cron panel in the web UI, whose
+  "next runs" preview (`frontend/src/views/cron/logic.ts`) has always applied
+  the OR rule — so the times it showed disagreed with when the job actually
+  fired. ([#660](https://github.com/use-agent-os/agent-os/issues/660))
+- `MemorySyncManager` retries a file whose indexing failed instead of losing it
+  until the next edit. `_do_file_sync()` replaced `_mtimes` with the fresh scan
+  *before* the index loop ran, so by the time `store.index_file()` raised, the
+  failing path was already recorded as seen — the next watcher tick compared
+  equal, the path never entered `changes`, and the retry its docstring promised
+  never happened. A transient store error (SQLite lock, provider timeout) on
+  `MEMORY.md` therefore left searches running against a stale or missing index
+  for that file until it was modified again or the process restarted. Index
+  failures now come back from `_do_file_sync()` alongside the existing delete
+  failures and are re-enqueued into `_pending_changes`, keeping the manager
+  dirty until a retry succeeds. The initial `start()` pass re-enqueues too,
+  where `_mtimes` is empty and the watcher diff could never have recovered the
+  path (#638).
+
+### Security
+
+- The strict SSRF fetch guard now enforces the cloud-metadata floor directly
+  instead of inferring it from the private/link-local ranges. `ssrf.py` keeps a
+  shared `_METADATA_ADDRESSES` set described as the non-negotiable floor, but
+  only the permissive guard (`assert_not_metadata_endpoint`, used by
+  `http_request`) consulted it. The stricter `assert_address_allowed_for_fetch`
+  — used by `web_fetch`, the media image fetch, browser navigation and
+  skill-dependency downloads — derived its coverage from `is_private` /
+  `is_loopback` / `is_link_local` / `is_reserved` instead.
+
+  That left the two guards inverted for one address. Alibaba Cloud's
+  `100.100.100.200` sits in CGNAT space (`100.64.0.0/10`), which Python
+  classifies as none of those and which no hard-blocked network covers, so the
+  *strict* guard allowed it while the *permissive* one blocked it. On an
+  Alibaba ECS deployment a URL the agent could be steered to fetch — directly,
+  or by prompt injection from page content it reads — returned the instance RAM
+  role credentials into the transcript. The connect-time guard shares the same
+  predicate, so DNS-delivered and redirect-hop variants were equally unguarded.
+
+  The metadata hostname check (`metadata.google.internal` and friends) now runs
+  in `validate_http_url_for_fetch` too, so a resolver answering those names
+  cannot launder the request through a public-looking address. Fetch policy is
+  a strict superset of the metadata-only policy again, and a parametrized test
+  asserts that for every entry in the shared set — the invariant that was
+  missing, rather than the single address that happened to break it.
+
+- The MCP SSE and Streamable HTTP transports now connect through the same
+  SSRF guard as the built-in HTTP tools. Both built a bare `httpx.AsyncClient`
+  from `MCPServerConfig.url` with no validation at all, so an MCP server entry
+  pointed at `169.254.169.254` reached the cloud metadata endpoint and its
+  instance credentials.
+
+  The policy is `validate_metadata_only_address` — the floor `http_request`
+  takes — not the full `validate_http_url_for_fetch`: `http://localhost:PORT/mcp`
+  and LAN-hosted MCP servers are the normal, intended configuration, and the
+  stricter policy rejects loopback and private ranges. The guard is installed as
+  a connect-time network backend (`ssrf_guarded_client`) rather than run once
+  against the URL text, so the address that gets validated is the address that
+  gets dialed: checking the URL and then handing it to a plain client leaves
+  httpx to resolve the hostname a second time, which a short-TTL DNS-rebinding
+  name can answer differently. Non-`http(s)` server URLs are now rejected up
+  front. ([#662](https://github.com/use-agent-os/agent-os/issues/662))
+
 ## [2026.9.2] - 2026-09-02
 
 ### Added

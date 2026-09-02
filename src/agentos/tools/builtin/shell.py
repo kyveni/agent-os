@@ -39,6 +39,7 @@ from agentos.sandbox.integration import (
 )
 from agentos.sandbox.policy import build_policy, select_level
 from agentos.sandbox.types import DenialReason, DenialResult, SandboxPolicy, SandboxRequest
+from agentos.tools.builtin.artifacts import publish_inline_artifacts
 from agentos.tools.builtin.shell_policy import check_safe_bin
 from agentos.tools.env_passthrough import build_subprocess_env
 from agentos.tools.path_policy import reject_foreign_host_path
@@ -789,6 +790,7 @@ async def exec_command(
                 output = redact_terminal_output(
                     stdout_bytes.decode("utf-8", errors="replace"), command
                 )
+                output = await publish_inline_artifacts(output)
                 return f"exit_code={proc.returncode}\n{output}"
             except Exception as e:
                 return f"[error] {e}"
@@ -796,6 +798,7 @@ async def exec_command(
         if sandbox_result.stderr:
             output += sandbox_result.stderr
         output = _append_sandbox_network_hint(redact_terminal_output(output, command))
+        output = await publish_inline_artifacts(output)
         return f"exit_code={sandbox_result.returncode}\n{output}"
 
     if elevated_bypass:
@@ -828,6 +831,7 @@ async def exec_command(
             output = redact_terminal_output(
                 output_file.read().decode("utf-8", errors="replace"), command
             )
+            output = await publish_inline_artifacts(output)
             return f"exit_code={proc.returncode}\n{output}"
     except Exception as e:
         return f"[error] {e}"
