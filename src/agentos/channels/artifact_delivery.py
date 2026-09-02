@@ -143,7 +143,8 @@ def can_deliver_channel_files(channel: Any) -> bool:
 @contextlib.contextmanager
 def _named_artifact_delivery_path(source: Path, filename: str) -> Iterator[Path]:
     with tempfile.TemporaryDirectory(prefix="agentos-artifact-") as tmp_dir:
-        target = Path(tmp_dir) / Path(filename).name
+        name = Path(filename).name or "unnamed_artifact"
+        target = Path(tmp_dir) / name
         try:
             target.hardlink_to(source)
         except OSError:

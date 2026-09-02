@@ -33,6 +33,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- ``_named_artifact_delivery_path`` now defaults to ``"unnamed_artifact"`` when
+  the artifact name has an empty leaf (``""`` or ``"."``), instead of resolving to
+  the directory root and causing downstream failures.
+  ([#742](https://github.com/use-agent-os/agent-os/issues/742))
+
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —
