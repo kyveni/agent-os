@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **CRITICAL**: Replace regex-only destructive code detection in `execute_code`
+  with an AST normalizer (`_CodeNormalizer`) that resolves obfuscated
+  access patterns (getattr with concatenated names,
+  `__import__`, `importlib.import_module`, exec/eval wrapping, wildcard
+  imports) before running the existing regex patterns (#848).
+
+### Fixed
+
+- Webhook delivery (`scheduler/delivery.py`) now uses
+  `ssrf_guarded_client(validator=validate_metadata_only_address)` at connect
+  time, closing the DNS-rebinding TOCTOU window that was missed when the rest
+  of the codebase was hardened in PR #697 (#725).
+
 ## [2026.9.3] - 2026-09-03
 
 ### Added
