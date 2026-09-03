@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **gmgn-wallet-score/score.py**: add `sys.argv` length guard and `--help`/`-h` flag to
+  prevent unhandled `IndexError` when invoked with fewer than 2 arguments.
+  ([#819](https://github.com/use-agent-os/agent-os/issues/819))
+
 ## [2026.9.3] - 2026-09-03
 
 ### Added

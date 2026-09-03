@@ -1,6 +1,25 @@
 #!/usr/bin/env python3
 import json, math, subprocess, sys
 
+def print_help():
+    print("Usage: score.py <wallet> <chain> [lang] [latency_s] [slippage_pct] [gas_usd] [sample]")
+    print()
+    print("Arguments:")
+    print("  wallet        Wallet address to score (required)")
+    print("  chain         Blockchain chain (required, e.g. 'sol', 'eth')")
+    print("  lang          Language: 'zh' or 'en' (default: 'zh')")
+    print("  latency_s     Entry latency in seconds (default: 3.0)")
+    print("  slippage_pct  One-sided slippage fraction (default: 0.05 = 5%%)")
+    print("  gas_usd       Gas cost per trade in USD (default: 0.2)")
+    print("  sample        Activity rows to sample, max 400 (default: 200)")
+    print()
+    print("Flags:")
+    print("  -h, --help    Show this help message and exit")
+    sys.exit(0)
+
+if len(sys.argv) < 3 or sys.argv[1] in ('-h', '--help'):
+    print_help()
+
 WALLET       = sys.argv[1]
 CHAIN        = sys.argv[2]
 LANG         = sys.argv[3] if len(sys.argv) > 3 else 'zh'
