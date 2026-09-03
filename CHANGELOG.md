@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **session_search FTS sanitizer** — no longer strips non-ASCII letters (CJK,
+  accented, Cyrillic, etc.) from FTS5 queries. The regex `[^a-zA-Z0-9\s]` was
+  replaced with Unicode-aware `[^\w\s]`. (#903)
+
 ## [2026.9.3] - 2026-09-03
 
 ### Added
