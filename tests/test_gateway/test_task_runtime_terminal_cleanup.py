@@ -2,9 +2,13 @@
 
 Verifies that, at terminal state, the four short-lived tracking dicts
 (``_tasks``, ``_running_by_session``, ``_pending_by_session``,
-``_last_envelope_by_session``) drop the task / session_key, while
-``_session_locks`` is intentionally retained to prevent split-brain on
-rapid re-enqueue. Also covers exception-path cleanup and a 10 000-task
+``_last_envelope_by_session``) drop the task / session_key.
+
+Also verifies that ``_session_locks`` and ``_session_execution_locks``
+are cleaned (same pattern as gh-966 for SessionWriteLock) to prevent
+unbounded memory growth on long-running gateways, while still being
+re-created via ``setdefault`` when the next task for the same session
+arrives. Covers exception-path cleanup and a 10 000-task
 tracemalloc-bounded soak.
 """
 
@@ -91,10 +95,11 @@ def _make_runtime(
 
 @pytest.mark.asyncio
 async def test_terminal_clears_all_dicts() -> None:
-    """After a task succeeds, tracking dicts (except _session_locks) must not contain its key.
+    """After a task succeeds, all tracking dicts including session locks must not contain its key.
 
-    ``_session_locks`` is intentionally NOT cleaned at terminal to prevent
-    split-brain under concurrent enqueue. All other dicts are cleaned.
+    ``_session_locks`` and ``_session_execution_locks`` are cleaned because
+    ``execution_lock`` serialises per-session ``_execute`` — no concurrent
+    writer means no split-brain.
     """
     rt = _make_runtime()
     env = _make_envelope("agent-1::sess-a")
@@ -105,9 +110,10 @@ async def test_terminal_clears_all_dicts() -> None:
     assert handle.task_id not in rt._tasks
     assert sk not in rt._running_by_session
     assert sk not in rt._pending_by_session
-    # _session_locks is intentionally retained: never pop while _execute may
-    # still hold the lock; prevents split-brain on rapid re-enqueue.
     assert sk not in rt._last_envelope_by_session
+    # session locks are evicted after _execute finishes
+    assert sk not in rt._session_locks
+    assert sk not in rt._session_execution_locks
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +123,7 @@ async def test_terminal_clears_all_dicts() -> None:
 
 @pytest.mark.asyncio
 async def test_cancel_clears_dicts() -> None:
-    """After a task is cancelled, all five tracking dicts must not contain its key."""
+    """After a task is cancelled, all tracking dicts and session locks must not contain its key."""
     started = asyncio.Event()
     blocker = asyncio.Event()
 
@@ -138,8 +144,9 @@ async def test_cancel_clears_dicts() -> None:
     assert handle.task_id not in rt._tasks
     assert sk not in rt._running_by_session
     assert sk not in rt._pending_by_session
-    # _session_locks is intentionally retained.
     assert sk not in rt._last_envelope_by_session
+    assert sk not in rt._session_locks
+    assert sk not in rt._session_execution_locks
 
 
 # ---------------------------------------------------------------------------
@@ -149,40 +156,39 @@ async def test_cancel_clears_dicts() -> None:
 
 @pytest.mark.asyncio
 async def test_session_lock_kept_during_pending() -> None:
-    """_session_locks must NOT be removed while another task is still pending."""
-    first_started = asyncio.Event()
+    """Session locks exist while tasks execute and are evicted after all complete."""
     first_release = asyncio.Event()
+    second_release = asyncio.Event()
+    call_count = 0
 
-    async def _slow_handler(_run: Any) -> None:
-        first_started.set()
-        await first_release.wait()
+    async def _blocking_handler(_run: Any) -> None:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            await first_release.wait()
+        else:
+            await second_release.wait()
 
-    # Only 1 concurrency slot so the second task stays pending.
-    rt = _make_runtime(turn_handler=_slow_handler, max_concurrency=1)
+    rt = _make_runtime(turn_handler=_blocking_handler, max_concurrency=1)
     env = _make_envelope("agent-1::sess-c")
 
     handle1 = await rt.enqueue(env, "first")
-    await asyncio.wait_for(first_started.wait(), timeout=2.0)
-
-    # Enqueue second task — it will be QUEUED (pending) while first is running.
+    await asyncio.sleep(0.02)
     handle2 = await rt.enqueue(env, "second")
-
     sk = env.session_key
-    # Session lock must exist because there is still a pending task.
+
+    # First is executing -> lock exists
     assert sk in rt._session_locks
 
-    # Now let the first task finish.
+    # Release both
     first_release.set()
+    second_release.set()
     await rt.wait(handle1.task_id, timeout=2.0)
-
-    # The lock should still exist because the second task is still alive.
-    assert sk in rt._session_locks
-
-    # Wait for second task to finish.
     await rt.wait(handle2.task_id, timeout=2.0)
 
-    # _session_locks is intentionally retained after all tasks complete;
-    # do not assert its absence here.
+    # Both done -> locks evicted
+    assert sk not in rt._session_locks
+    assert sk not in rt._session_execution_locks
 
 
 # ---------------------------------------------------------------------------
@@ -192,13 +198,8 @@ async def test_session_lock_kept_during_pending() -> None:
 
 @pytest.mark.asyncio
 async def test_exception_path_clears_dicts() -> None:
-    """Even when the turn handler raises, cleanup must run for 4 tracking dicts.
-
-    ``_session_locks`` is intentionally NOT cleared on terminal: retaining
-    the lock prevents split-brain when a new enqueue races with _execute's
-    post-terminal cleanup. All other 4 dicts (``_tasks``,
-    ``_running_by_session``, ``_pending_by_session``,
-    ``_last_envelope_by_session``) must be cleaned up.
+    """Even when the turn handler raises, cleanup must run for all tracking dicts
+    including session locks.
     """
 
     async def _failing_handler(_run: Any) -> None:
@@ -212,10 +213,10 @@ async def test_exception_path_clears_dicts() -> None:
     sk = env.session_key
     assert handle.task_id not in rt._tasks
     assert sk not in rt._running_by_session
-    # _session_locks is intentionally retained after terminal: prevents
-    # split-brain on rapid re-enqueue; lock is cheap and bounded per session_key.
     assert sk not in rt._pending_by_session
     assert sk not in rt._last_envelope_by_session
+    assert sk not in rt._session_locks
+    assert sk not in rt._session_execution_locks
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +268,7 @@ async def test_no_leak_under_load(monkeypatch: pytest.MonkeyPatch) -> None:
 
     after_tasks = len(rt._tasks)
     after_locks = len(rt._session_locks)
+    after_execution_locks = len(rt._session_execution_locks)
     after_pending = len(rt._pending_by_session)
     after_running = len(rt._running_by_session)
     after_envelope = len(rt._last_envelope_by_session)
@@ -275,12 +277,13 @@ async def test_no_leak_under_load(monkeypatch: pytest.MonkeyPatch) -> None:
     assert abs(after_tasks - baseline_tasks) <= tolerance, (
         f"_tasks leaked: baseline={baseline_tasks}, after={after_tasks}"
     )
-    # _session_locks is intentionally NOT cleaned at terminal to prevent
-    # split-brain on rapid re-enqueue.  The dict grows by # unique session_keys
-    # (capped at session_count=50 here), not by # tasks.  We verify it is bounded
-    # by session_count rather than by num_tasks.
-    assert after_locks <= session_count + tolerance, (
-        f"_session_locks grew beyond unique session count: {after_locks} > {session_count}"
+    # Session locks are evicted after each _execute finishes; all tasks have
+    # completed so the dicts must be empty.
+    assert after_locks <= tolerance, (
+        f"_session_locks leaked: after={after_locks}"
+    )
+    assert after_execution_locks <= tolerance, (
+        f"_session_execution_locks leaked: after={after_execution_locks}"
     )
     assert abs(after_pending - baseline_pending) <= tolerance, (
         f"_pending_by_session leaked: baseline={baseline_pending}, after={after_pending}"
@@ -299,3 +302,45 @@ async def test_no_leak_under_load(monkeypatch: pytest.MonkeyPatch) -> None:
     top_stats = snap_after.compare_to(snap_before, "lineno")
     total_added = sum(s.size_diff for s in top_stats if s.size_diff > 0)
     assert total_added < 200 * 1024 * 1024, f"Unexpected memory growth: {total_added / 1024:.1f} KB"
+
+
+# ---------------------------------------------------------------------------
+# execution_locks_evicted_on_exit (gh-1040 regression)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_execution_locks_evicted_on_exit() -> None:
+    """Both _session_locks and _session_execution_locks must be evicted after a
+    task's _execute completes, even on early return (cancelled) or exception.
+    """
+    rt = _make_runtime()
+    env = _make_envelope("agent-1::sess-gh1040")
+    handle = await rt.enqueue(env, "hello")
+    await rt.wait(handle.task_id, timeout=2.0)
+
+    sk = env.session_key
+    assert sk not in rt._session_locks
+    assert sk not in rt._session_execution_locks
+
+
+@pytest.mark.asyncio
+async def test_execution_locks_evicted_after_cancel() -> None:
+    """Ensure cancellation path also evicts locks."""
+    started = asyncio.Event()
+    blocker = asyncio.Event()
+
+    async def _blocking_handler(_run: Any) -> None:
+        started.set()
+        await blocker.wait()
+
+    rt = _make_runtime(turn_handler=_blocking_handler)
+    env = _make_envelope("agent-1::sess-gh1040b")
+    handle = await rt.enqueue(env, "hello")
+    await asyncio.wait_for(started.wait(), timeout=2.0)
+    await rt.cancel(task_id=handle.task_id)
+    await rt.wait(handle.task_id, timeout=2.0)
+
+    sk = env.session_key
+    assert sk not in rt._session_locks
+    assert sk not in rt._session_execution_locks

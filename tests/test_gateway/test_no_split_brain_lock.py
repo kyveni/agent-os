@@ -1,6 +1,7 @@
-"""Tests for C3 fix: no split-brain lock on rapid re-enqueue after terminal.
+"""Tests for no split-brain lock on rapid re-enqueue after terminal.
 
-AC-C3-1: _session_locks is never popped in _mark_terminal.
+AC-C3-1: _session_locks may be popped in _execute's finally block (evicted)
+         but is re-created via setdefault on the next _execute call.
 AC-C3-2: rapid enqueue -> terminal -> re-enqueue for same session_key never
           allows two tasks to run concurrently (max_concurrent_per_session == 1).
 """
@@ -66,8 +67,13 @@ def _make_storage() -> Any:
 
 
 @pytest.mark.asyncio
-async def test_session_locks_never_popped_at_terminal() -> None:
-    """After a task reaches terminal state, _session_locks still contains the key."""
+async def test_session_locks_evicted_after_terminal() -> None:
+    """After a task reaches terminal state, _session_locks is evicted.
+
+    Safety is provided by execution_lock which serializes per-session
+    _execute calls — the entry is popped on exit and re-created via
+    setdefault on the next _execute.
+    """
 
     async def _instant(_run: Any) -> None:
         pass
@@ -81,10 +87,12 @@ async def test_session_locks_never_popped_at_terminal() -> None:
     handle = await rt.enqueue(env, "msg")
     await rt.wait(handle.task_id, timeout=5.0)
 
-    # Lock must still be present — C3 fix ensures we never pop it.
-    assert env.session_key in rt._session_locks, (
-        "_session_locks should retain the entry after terminal (C3 fix)"
+    # Lock is popped after _execute completes; next enqueue will
+    # re-create it via setdefault in _execute.
+    assert env.session_key not in rt._session_locks, (
+        "_session_locks should be evicted after _execute completes"
     )
+    assert env.session_key not in rt._session_execution_locks
 
 
 # ---------------------------------------------------------------------------

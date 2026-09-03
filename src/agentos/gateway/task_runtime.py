@@ -910,6 +910,11 @@ class TaskRuntime:
                 error_class=str(getattr(exc, "code", None) or type(exc).__name__),
                 error_message=str(exc),
             )
+        finally:
+            # Evict per-session locks so the dicts don't grow without bound
+            # (same pattern as gh-966 for SessionWriteLock).
+            self._session_locks.pop(session_key, None)
+            self._session_execution_locks.pop(session_key, None)
 
     async def _run_turn_handler_with_write_lock_bypass(
         self,
