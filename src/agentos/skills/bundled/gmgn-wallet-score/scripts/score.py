@@ -1,6 +1,31 @@
 #!/usr/bin/env python3
 import json, math, subprocess, sys
 
+
+def print_help():
+    print(f"Usage: {sys.argv[0]} <wallet> <chain> [lang] [latency_s] [slippage_pct] [gas_usd] [sample]")
+    print()
+    print("Arguments:")
+    print("  wallet        Wallet address to score")
+    print("  chain         Blockchain chain (e.g. sol, eth, bsc)")
+    print("  lang          Display language: zh (Chinese, default) or en (English)")
+    print("  latency_s     Entry lag in seconds (default: 3.0)")
+    print("  slippage_pct  One-sided slippage fraction (default: 0.05 = 5%%)")
+    print("  gas_usd       Gas cost per trade in USD (default: 0.2)")
+    print("  sample        Activity rows to sample, max 400 (default: 200)")
+    sys.exit(0)
+
+
+if len(sys.argv) < 3:
+    if len(sys.argv) == 2 and sys.argv[1] in ('-h', '--help'):
+        print_help()
+    print(f"Error: missing arguments. Usage: {sys.argv[0]} <wallet> <chain>")
+    print(f"Run '{sys.argv[0]} --help' for full usage.")
+    sys.exit(2)
+
+if sys.argv[1] in ('-h', '--help'):
+    print_help()
+
 WALLET       = sys.argv[1]
 CHAIN        = sys.argv[2]
 LANG         = sys.argv[3] if len(sys.argv) > 3 else 'zh'
