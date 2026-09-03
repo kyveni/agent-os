@@ -923,8 +923,11 @@ async def list_dir(path: str) -> str:
             if entry.is_dir():
                 dirs.append(f"[dir]  {entry.name}/")
             else:
-                size = entry.stat().st_size
-                files.append(f"[file] {entry.name} ({size} bytes)")
+                try:
+                    size = entry.stat().st_size
+                    files.append(f"[file] {entry.name} ({size} bytes)")
+                except FileNotFoundError:
+                    files.append(f"[file] {entry.name} (broken symlink)")
         return dirs + files + blocked_entries
 
     entries = await loop.run_in_executor(None, _list)
