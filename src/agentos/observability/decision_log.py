@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 from dataclasses import asdict, dataclass, field, fields
@@ -23,6 +24,8 @@ from typing import Literal
 
 from agentos.bootstrap_types import BootstrapFileReport
 from agentos.paths import default_agentos_home
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 14
 _INTENT_SUMMARY_MAX_CHARS = 500
@@ -276,7 +279,11 @@ def load_entries(path: Path) -> list[DecisionEntry]:
         line = line.strip()
         if not line:
             continue
-        payload = json.loads(line)
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            logger.warning("Skipping malformed JSONL line in %s: %s", path, line[:120])
+            continue
         payload = _coerce_decision_payload(payload)
         steps_payload = payload.pop("pipeline_steps", [])
         steps = [

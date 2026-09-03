@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **load_entries** — no longer crashes with `json.JSONDecodeError` when encountering
+  corrupted/truncated JSONL lines; malformed lines are skipped with a warning.
+  (\#812)
+
 ## [2026.9.3] - 2026-09-03
 
 ### Added
