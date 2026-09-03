@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Slack webhook now fails closed when signing_secret is None:
+  non-url_verification requests return 401, url_verification echo (safe,
+  no side-effects) is still allowed so operators can pass Slack's
+  endpoint check while wiring the secret up.
+  ([#674](https://github.com/use-agent-os/agent-os/issues/674))
+
 ## [2026.9.3] - 2026-09-03
 
 ### Added
