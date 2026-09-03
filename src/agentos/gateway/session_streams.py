@@ -117,6 +117,11 @@ class SessionStreamRegistry:
         )
 
 
+    def evict(self, session_key: str) -> None:
+        self._seq_by_session.pop(session_key, None)
+        self._events_by_session.pop(session_key, None)
+
+
 _session_streams = SessionStreamRegistry()
 
 

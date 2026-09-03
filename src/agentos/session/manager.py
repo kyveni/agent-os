@@ -844,6 +844,12 @@ class SessionManager:
             evict_spawn_lock(session_key)
         except Exception:
             pass
+        try:
+            from agentos.gateway.session_streams import get_session_streams
+
+            get_session_streams().evict(session_key)
+        except Exception:
+            pass
 
     async def branch(
         self,

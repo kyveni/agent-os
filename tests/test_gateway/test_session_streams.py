@@ -83,3 +83,27 @@ def test_session_stream_registry_reports_reset_when_client_cursor_is_ahead() -> 
     assert replay.replay_complete is False
     assert replay.gap_reason == "stream_buffer_reset"
     assert replay.events == []
+
+
+def test_session_stream_registry_evict_removes_session_keys() -> None:
+    """After evict, both dicts must not contain the session key."""
+    registry = SessionStreamRegistry(max_events_per_session=5)
+    registry.record("agent:main:sess-a", "session.event.text_delta", {"text": "a"})
+    registry.record("agent:main:sess-b", "session.event.text_delta", {"text": "b"})
+    registry.record("agent:main:sess-a", "session.event.text_delta", {"text": "c"})
+
+    registry.evict("agent:main:sess-a")
+
+    # sess-a must be gone from both dicts
+    assert "agent:main:sess-a" not in registry._seq_by_session
+    assert "agent:main:sess-a" not in registry._events_by_session
+    # sess-b must remain untouched
+    assert "agent:main:sess-b" in registry._seq_by_session
+    assert "agent:main:sess-b" in registry._events_by_session
+
+
+def test_session_stream_registry_evict_idempotent() -> None:
+    """Evicting a non-existent key must not raise."""
+    registry = SessionStreamRegistry(max_events_per_session=5)
+    registry.evict("agent:main:nobody")
+    registry.evict("agent:main:nobody")  # second call must also be safe
