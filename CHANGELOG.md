@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `send_file` in all channel adapters now rejects files larger than the
+  adapter's upload ceiling before any data is sent, preventing resource
+  exhaustion from oversized uploads. Each adapter declares its own limit:
+  Discord 10 MB, Telegram 50 MB, Email 25 MB.
+  ([#683](https://github.com/use-agent-os/agent-os/issues/683))
+
 ## [2026.9.3] - 2026-09-03
 
 ### Added
