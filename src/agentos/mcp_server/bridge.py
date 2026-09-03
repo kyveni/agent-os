@@ -10,6 +10,11 @@ from typing import Any, Protocol
 
 from agentos.gateway_client import normalize_gateway_url
 
+# Upper bounds for resource-exhaustion vectors exposed by the MCP bridge.
+_MAX_EVENTS_UPPER = 10_000
+_MAX_TIMEOUT_MS_UPPER = 300_000
+_MAX_HISTORY_LIMIT_UPPER = 5_000
+_MAX_SESSIONS_LIMIT_UPPER = 5_000
 
 class GatewayClientLike(Protocol):
     async def connect(self, url: str) -> None: ...
@@ -65,6 +70,7 @@ class AgentOSMCPBridge:
 
     async def conversations_list(self, limit: int = 50) -> dict[str, Any]:
         client = await self._ensure_client()
+        limit = min(max(1, limit), _MAX_SESSIONS_LIMIT_UPPER)
         return await client.list_sessions(limit=limit)
 
     async def session_resolve(self, key: str) -> dict[str, Any]:
@@ -73,6 +79,7 @@ class AgentOSMCPBridge:
 
     async def messages_read(self, key: str, limit: int = 1000) -> dict[str, Any]:
         client = await self._ensure_client()
+        limit = min(max(1, limit), _MAX_HISTORY_LIMIT_UPPER)
         return await client.session_history(key, limit=limit)
 
     async def messages_send(
@@ -131,8 +138,9 @@ class AgentOSMCPBridge:
             current_stream_seq = int(
                 subscription.get("current_stream_seq") or since_stream_seq or 0
             )
-            deadline = time.monotonic() + max(0, timeout_ms) / 1000
-            max_events = max(1, max_events)
+            max_events = min(max(1, max_events), _MAX_EVENTS_UPPER)
+            timeout_ms = min(max(0, timeout_ms), _MAX_TIMEOUT_MS_UPPER)
+            deadline = time.monotonic() + timeout_ms / 1000
 
             while len(events) < max_events:
                 remaining = deadline - time.monotonic()
@@ -168,6 +176,7 @@ class AgentOSMCPBridge:
             await client.close()
 
     async def transcript_jsonl(self, key: str, limit: int = 1000) -> str:
+        limit = min(max(1, limit), _MAX_HISTORY_LIMIT_UPPER)
         history = await self.messages_read(key, limit=limit)
         messages = history.get("messages", []) if isinstance(history, dict) else []
         rows = [_message_to_event(row) for row in messages if isinstance(row, dict)]

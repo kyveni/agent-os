@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **MCP bridge**: Upper-clamp , , history limits, and session-list
+  limits to prevent resource exhaustion from misbehaving or compromised MCP clients.
+  ([#685](https://github.com/use-agent-os/agent-os/issues/685))
+
 ## [2026.9.3] - 2026-09-03
 
 ### Added

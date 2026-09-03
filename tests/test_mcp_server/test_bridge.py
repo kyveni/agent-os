@@ -17,6 +17,7 @@ class FakeGatewayClient:
         self.closed = False
         self.calls: list[tuple[str, dict[str, Any] | None]] = []
         self.events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self.last_recv_timeout: float | None = None
 
     async def connect(self, url: str) -> None:
         self.connected_url = url
@@ -90,6 +91,7 @@ class FakeGatewayClient:
         raise AssertionError(f"unexpected method: {method}")
 
     async def recv_event(self, timeout: float | None = None) -> dict[str, Any]:
+        self.last_recv_timeout = timeout
         if timeout is None:
             return await self.events.get()
         return await asyncio.wait_for(self.events.get(), timeout=timeout)
