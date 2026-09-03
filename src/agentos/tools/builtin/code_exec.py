@@ -25,8 +25,11 @@ from agentos.tools.types import ToolError, current_tool_context
 
 # Destructive Python patterns that must go through the same approval flow as
 # shell warnlist hits. Catches the "agent pivots from `rm` to `os.remove()`"
-# bypass. Matching is intentionally shallow (regex, not AST) — goal is to
-# force approval on obvious intent, not to prove safety.
+# bypass. The check uses a two-layer defense:
+#   1. regex on the original code (fast path for obvious intent).
+#   2. AST normalizer that resolves getattr, __import__, importlib.import_module,
+#      exec/eval nesting, f-strings, and wildcard imports from destructive
+#      modules, then re-checks the normalized form.
 _DESTRUCTIVE_PY_PATTERNS: list[tuple[str, str]] = [
     (r"\bos\.remove\s*\(", "os.remove()"),
     (r"\bos\.unlink\s*\(", "os.unlink()"),
@@ -47,11 +50,148 @@ _DESTRUCTIVE_PY_PATTERNS: list[tuple[str, str]] = [
 ]
 
 
+class _CodeNormalizer(ast.NodeTransformer):
+    """Constant-fold the AST and resolve obfuscated access patterns so the
+    regex-based _DESTRUCTIVE_PY_PATTERNS can match what the attacker intended.
+
+    Handles:
+    - getattr(os, "rem" + "ove")        → os.remove
+    - __import__("os").remove           → os.remove
+    - importlib.import_module("os")     → os (module name)
+    - exec("os.remove(...)") / eval(…)  → recursively normalize inner string
+    - from os import *                    → inject sentinel call for regex
+    """
+
+    _DESTRUCTIVE_MODULE_NAMES: frozenset[str] = frozenset(
+        {"os", "shutil", "subprocess", "pathlib"}
+    )
+
+    @staticmethod
+    def _is_const_str(node: ast.AST) -> str | None:
+        """Return the constant string value if *node* is a constant string
+        or a simple string concatenation."""
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left = _CodeNormalizer._is_const_str(node.left)
+            right = _CodeNormalizer._is_const_str(node.right)
+            if left is not None and right is not None:
+                return left + right
+        return None
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        self.generic_visit(node)
+        # getattr(obj, "attr" + "name")  →  obj.attrname
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) >= 2
+        ):
+            attr_name = self._is_const_str(node.args[1])
+            if attr_name is not None:
+                return ast.Attribute(
+                    value=node.args[0],
+                    attr=attr_name,
+                    ctx=ast.Load(),
+                )
+            return node
+        # __import__("os")  →  os
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "__import__"
+            and node.args
+        ):
+            mod_name = self._is_const_str(node.args[0])
+            if mod_name is not None:
+                return ast.Name(id=mod_name, ctx=ast.Load())
+            return node
+        # importlib.import_module("os") | importlib.__import__("os")  →  os
+        if (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "importlib"
+            and node.func.attr in ("import_module", "__import__")
+            and node.args
+        ):
+            mod_name = self._is_const_str(node.args[0])
+            if mod_name is not None:
+                return ast.Name(id=mod_name, ctx=ast.Load())
+            return node
+        # exec("os.remove(...)") / eval("os.remove(...)") — recursively
+        # normalize the inner string so outer patterns see it
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id in ("exec", "eval")
+            and node.args
+        ):
+            inner_code = self._is_const_str(node.args[0])
+            if inner_code is not None:
+                normalized_inner = _normalize_code(inner_code)
+                node.args[0] = ast.Constant(value=normalized_inner)
+            return node
+        return node
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.AST:
+        """Flag wildcard imports from destructive modules by injecting a
+        recognizable sentinel call that the regex will match."""
+        self.generic_visit(node)
+        if (
+            node.module in self._DESTRUCTIVE_MODULE_NAMES
+            and node.names
+            and any(a.name == "*" for a in node.names)
+        ):
+            sentinel = ast.Expr(
+                value=ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Name(id="os", ctx=ast.Load()),
+                        attr="remove",
+                        ctx=ast.Load(),
+                    ),
+                    args=[ast.Constant(value="/sentinel/from_wildcard")],
+                    keywords=[],
+                )
+            )
+            return [node, sentinel]  # type: ignore[return-value]
+        return node
+
+
+def _normalize_code(code: str) -> str:
+    """Constant-fold the AST and resolve obfuscated access patterns.
+    Returns normalized code on success, or the original string unchanged
+    when the input is not parseable (fall-through to regex-only)."""
+    try:
+        tree = ast.parse(code, mode="exec")
+    except SyntaxError:
+        return code
+    normalizer = _CodeNormalizer()
+    try:
+        new_tree = normalizer.visit(tree)
+        ast.fix_missing_locations(new_tree)
+        return ast.unparse(new_tree)
+    except Exception:
+        return code
+
+
 def _check_code_destructive(code: str) -> str | None:
-    """Return a human-readable warning if *code* triggers a destructive pattern, else None."""
+    """Return a human-readable warning if *code* triggers a destructive
+    pattern, else None.
+
+    Two-layer defense:
+      1. Regex against original code (fast path catches obvious intent).
+      2. AST normalize + regex against normalized form (catches obfuscation).
+    """
+    # Layer 1: regex on original code
     for pattern, label in _DESTRUCTIVE_PY_PATTERNS:
         if re.search(pattern, code):
             return f"destructive Python operation detected: {label}"
+
+    # Layer 2: AST normalize then re-check
+    normalized = _normalize_code(code)
+    if normalized != code:
+        for pattern, label in _DESTRUCTIVE_PY_PATTERNS:
+            if re.search(pattern, normalized):
+                return f"destructive Python operation detected (resolved): {label}"
+
     return None
 
 
