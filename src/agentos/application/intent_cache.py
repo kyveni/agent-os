@@ -45,9 +45,13 @@ _LONG_FLAG_CAPS: dict[str, frozenset[str]] = {
     "--no-preserve-root": frozenset({CAP_NO_PRESERVE_ROOT}),
 }
 
-# Python delete functions that carry recursive capability.
-_PY_RECURSIVE_PATTERNS: tuple[re.Pattern[str], ...] = (
+# Python delete functions that carry recursive + force capability (inherently destructive).
+_PY_RECURSIVE_FORCE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bshutil\.rmtree\s*\(\s*[\"']([^\"']+)[\"']"),
+)
+
+# Python delete functions that carry recursive-only capability (removes empty dirs).
+_PY_RECURSIVE_ONLY_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bos\.removedirs\s*\(\s*[\"']([^\"']+)[\"']"),
 )
 
