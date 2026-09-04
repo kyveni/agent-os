@@ -24,10 +24,6 @@ from agentos.application.intent_cache import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Escalation capability extractor tests
-# ---------------------------------------------------------------------------
-
 class TestExtractIntents:
     """Validate the shape of extracted intents."""
 
@@ -127,10 +123,6 @@ class TestExtractIntents:
         assert _extract_intents("echo hello") == []
 
 
-# ---------------------------------------------------------------------------
-# Cache record/check lifecycle with escalation caps
-# ---------------------------------------------------------------------------
-
 class TestRecordAndCheck:
     """Basic record/check lifecycle with subset-rule."""
 
@@ -170,12 +162,8 @@ class TestRecordAndCheck:
         assert cache.check("rm /a") is True
 
 
-# ---------------------------------------------------------------------------
-# Subset-rule: approving weaker caps does NOT satisfy stronger caps
-# ---------------------------------------------------------------------------
-
 class TestSubsetRule:
-    """Core security property: requested ⊆ approved."""
+    """Core security property: requested caps subset of approved caps."""
 
     def test_plain_delete_does_not_authorize_recursive(self) -> None:
         """CERT #849 primary vector: rm /tmp/a --X--> rm -rf /tmp/a."""
@@ -190,17 +178,17 @@ class TestSubsetRule:
         assert cache.check("rm -f /tmp/a") is False
 
     def test_recursive_authorizes_plain_delete(self) -> None:
-        """Approving rm -rf /a should cover rm /a (subset: {} ⊆ {recursive})."""
+        """Approving rm -rf /a should cover rm /a (subset: {} subseteq {recursive})."""
         cache = IntentApprovalCache()
         cache.record("rm -rf /tmp/a")
         assert cache.check("rm -rf /tmp/a") is True
-        assert cache.check("rm /tmp/a") is True  # subset rule
+        assert cache.check("rm /tmp/a") is True
 
     def test_recursive_does_not_authorize_recursive_force(self) -> None:
         cache = IntentApprovalCache()
         cache.record("rm -r /tmp/a")
         assert cache.check("rm -r /tmp/a") is True
-        assert cache.check("rm -rf /tmp/a") is False  # force not approved
+        assert cache.check("rm -rf /tmp/a") is False
 
     def test_force_does_not_authorize_recursive(self) -> None:
         cache = IntentApprovalCache()
@@ -212,13 +200,9 @@ class TestSubsetRule:
         cache = IntentApprovalCache()
         cache.record("rm -rf /a /b")
         assert cache.check("rm -rf /a /b") is True
-        assert cache.check("rm /a /b") is True  # subset
-        assert cache.check("rm -rf /a /b /c") is False  # extra target
+        assert cache.check("rm /a /b") is True
+        assert cache.check("rm -rf /a /b /c") is False
 
-
-# ---------------------------------------------------------------------------
-# Andreapn's bypass vectors from the review (all must be closed)
-# ---------------------------------------------------------------------------
 
 class TestAndreapnBypassVectors:
     """Every bypass vector @andreapn identified in v1 review."""
@@ -251,7 +235,7 @@ class TestAndreapnBypassVectors:
         """rm -rf /a approved -> rm -rf /b must be False (never approved)."""
         cache = IntentApprovalCache()
         cache.record("rm -rf /a; rm /b")
-        assert cache.check("rm -rf /b") is False  # /b was only approved unflagged
+        assert cache.check("rm -rf /b") is False
 
     def test_plain_rm_covers_os_remove(self) -> None:
         """rm /a approved -> os.remove('/a') should be True (same caps)."""
@@ -298,10 +282,6 @@ class TestAndreapnBypassVectors:
         assert cache.check("rm -r /a") is True
 
 
-# ---------------------------------------------------------------------------
-# Cross-PR bypass vectors
-# ---------------------------------------------------------------------------
-
 class TestCompoundCommandSeparatorBypass:
     """Every shell separator must be caught by the permission cache."""
 
@@ -344,10 +324,6 @@ class TestMultiTargetApproval:
         assert cache.check("rm /a /b /c") is False
 
 
-# ---------------------------------------------------------------------------
-# Scope isolation
-# ---------------------------------------------------------------------------
-
 class TestScopeIsolation:
     """Scope-aware entries: 'once' and 'always' do not interfere."""
 
@@ -378,37 +354,24 @@ class TestScopeIsolation:
         whatever the 'always' entry had.
         """
         cache = IntentApprovalCache()
-        cache.record_always("rm /a")           # user picks "always" for plain delete
-        cache.record("rm -rf /a", scope="once")  # user picks "once" for recursive
-        assert cache.check("rm -rf /a") is True   # both scopes active
-        cache.clear_scope("once")                 # new turn
-        # The "always" entry is (frozenset(), expires) — no caps.
-        # caps {recursive, force} is NOT a subset of frozenset().
-        assert cache.check("rm -rf /a") is False, (
-            "once-scoped recursive grant must not persist into the always entry"
-        )
-        # Plain delete still works because always had no caps
+        cache.record_always("rm /a")
+        cache.record("rm -rf /a", scope="once")
+        assert cache.check("rm -rf /a") is True
+        cache.clear_scope("once")
+        assert cache.check("rm -rf /a") is False
         assert cache.check("rm /a") is True
 
-
-# ---------------------------------------------------------------------------
-# Monotonic caps union
-# ---------------------------------------------------------------------------
 
 class TestMonotonicCaps:
     """Approving weaker caps must not downgrade an existing entry."""
 
     def test_monotonic_union(self) -> None:
         cache = IntentApprovalCache()
-        cache.record("rm -rf /a")      # caps = {recursive, force}
-        cache.record("rm /a")          # weaker caps, should not downgrade
-        assert cache.check("rm -rf /a") is True  # still has recursive + force
-        assert cache.check("rm -f /a") is True    # force subset still OK
+        cache.record("rm -rf /a")
+        cache.record("rm /a")
+        assert cache.check("rm -rf /a") is True
+        assert cache.check("rm -f /a") is True
 
-
-# ---------------------------------------------------------------------------
-# Flag normalization across long/short variants
-# ---------------------------------------------------------------------------
 
 class TestFlagVariants:
     """Different flag spellings that produce equivalent caps."""
