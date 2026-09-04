@@ -38,7 +38,7 @@ class TestExtractIntents:
         assert len(intents) == 1
         kind, caps, target = intents[0]
         assert kind == "delete"
-        assert target == "/tmp/a"
+        assert target == str(Path("/tmp/a").resolve())
         assert CAP_RECURSIVE in caps
         assert CAP_FORCE in caps
 
