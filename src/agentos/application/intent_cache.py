@@ -142,7 +142,8 @@ def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
 
         for tokens in token_sets:
             for token in tokens:
-                if not token or token.startswith("-") or token in _SHELL_SEPARATORS or token == "--":
+                if not token or token.startswith("-") or token in _SHELL_SEPARATORS \
+                    or token == "--":
                     continue
                 if token in seen_targets:
                     continue

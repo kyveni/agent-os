@@ -21,7 +21,6 @@ from agentos.application.intent_cache import (
     CAP_RECURSIVE,
     IntentApprovalCache,
     _extract_intents,
-    reset_intent_cache,
 )
 
 
@@ -373,7 +372,7 @@ class TestScopeIsolation:
 
     def test_once_cannot_permanently_upgrade_always(self) -> None:
         """PR #853 review: once approval must not permanently upgrade always.
-        
+
         A once approval for rm -rf /a should only survive its turn scope.
         After clear_scope("once"), the rm -rf /a check must fall back to
         whatever the 'always' entry had.
