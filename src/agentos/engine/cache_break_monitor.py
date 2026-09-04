@@ -10,6 +10,8 @@ from typing import Any
 
 from agentos.provider import ChatConfig, Message, ToolDefinition
 
+_BASELINE_CACHE_MAX: int = 2000
+
 
 def _jsonable(value: Any) -> Any:
     """Return a stable JSON-ish shape for Pydantic models and dataclasses."""
@@ -197,6 +199,7 @@ class CacheBreakMonitor:
         previous = self._baselines.get(session_key)
         reset_pending = session_key in self._reset_pending
         self._baselines[session_key] = _CacheBaseline(snapshot, current_tokens)
+        self._evict_stale_baselines()
         if reset_pending:
             self._reset_pending.discard(session_key)
             return CacheBreakReport(
@@ -235,6 +238,18 @@ class CacheBreakMonitor:
     def notify_compaction(self, session_key: str) -> None:
         """Treat the next provider response for this session as a new baseline."""
         self._reset_pending.add(session_key)
+
+    def _evict_stale_baselines(self) -> None:
+        """Evict oldest entries when cache exceeds max."""
+        if len(self._baselines) > _BASELINE_CACHE_MAX:
+            excess = len(self._baselines) - _BASELINE_CACHE_MAX
+            for key in list(self._baselines.keys())[:excess]:
+                del self._baselines[key]
+
+    def purge_session(self, session_key: str) -> None:
+        """Evict a specific session baseline."""
+        self._baselines.pop(session_key, None)
+        self._reset_pending.discard(session_key)
 
     def clear(self) -> None:
         self._baselines.clear()
