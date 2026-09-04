@@ -9,13 +9,16 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 
 import structlog
 
 from agentos.session.keys import normalize_agent_id
 
 from .pricing import calculate_cost_usd, lookup_price
+
+_SESSION_METADATA_CACHE_MAX: Final[int] = 2000
+_SCOPES_CACHE_MAX: Final[int] = 2000
 
 log = structlog.get_logger(__name__)
 
@@ -577,7 +580,20 @@ class UsageTracker:
         if meta is None:
             meta = parse_session_key_scope(session_key)
             self._session_metadata[session_key] = meta
+            self._evict_stale_session_metadata()
         return meta
+
+    def _evict_stale_session_metadata(self) -> None:
+        if len(self._session_metadata) > _SESSION_METADATA_CACHE_MAX:
+            excess = len(self._session_metadata) - _SESSION_METADATA_CACHE_MAX
+            for key in list(self._session_metadata.keys())[:excess]:
+                del self._session_metadata[key]
+
+    def _evict_stale_scopes(self) -> None:
+        if len(self._scopes) > _SCOPES_CACHE_MAX:
+            excess = len(self._scopes) - _SCOPES_CACHE_MAX
+            for key in list(self._scopes.keys())[:excess]:
+                del self._scopes[key]
 
     def check_budget_limits(self, session_key: str, config: Any) -> tuple[bool, str | None]:
         """Evaluate every configured spend ceiling for ``session_key``.
@@ -732,6 +748,7 @@ class UsageTracker:
             if scoped is None:
                 scoped = SessionUsage(model_id=model_id, provider_id=effective_provider_id)
                 self._scopes[(session_key, scope_key)] = scoped
+            self._evict_stale_scopes()
             scoped.add(
                 input_tokens,
                 output_tokens,
