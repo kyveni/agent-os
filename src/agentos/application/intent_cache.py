@@ -185,8 +185,15 @@ def _extract_intents(
         existing = caps_by_target.get(target, frozenset())
         caps_by_target[target] = existing | caps
 
-    # Python recursive deletes (shutil.rmtree, os.removedirs).
-    for pattern in _PY_RECURSIVE_PATTERNS:
+    # Python recursive+force deletes (shutil.rmtree — inherently forced).
+    for pattern in _PY_RECURSIVE_FORCE_PATTERNS:
+        for m in pattern.finditer(command):
+            target = m.group(1)
+            existing = caps_by_target.get(target, frozenset())
+            caps_by_target[target] = existing | frozenset({CAP_RECURSIVE, CAP_FORCE})
+
+    # Python recursive-only deletes (os.removedirs — removes empty dirs recursively).
+    for pattern in _PY_RECURSIVE_ONLY_PATTERNS:
         for m in pattern.finditer(command):
             target = m.group(1)
             existing = caps_by_target.get(target, frozenset())
@@ -326,7 +333,7 @@ class IntentApprovalCache:
                 # Remove all scope entries for this (kind, target).
                 keys_to_remove = [
                     k for k in self._entries
-                    if k[0] == kind and k[2] == target
+                    if k[0] == kind and k[1] == target
                 ]
                 for k in keys_to_remove:
                     self._entries.pop(k, None)

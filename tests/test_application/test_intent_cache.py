@@ -71,11 +71,14 @@ class TestExtractIntents:
         targets = {t for _, _, t in intents}
         assert targets == {"/a", "/b", "/c"}
 
-    def test_shutil_rmtree_is_recursive(self) -> None:
+    def test_shutil_rmtree_is_recursive_force(self) -> None:
+        """shutil.rmtree carries recursive + force caps (inherently destructive)."""
         intents = _extract_intents('shutil.rmtree("/tmp/a")')
-        assert intents == [("delete", frozenset({CAP_RECURSIVE}), "/tmp/a")]
+        caps = frozenset({CAP_RECURSIVE, CAP_FORCE})
+        assert intents == [("delete", caps, "/tmp/a")]
 
-    def test_os_removedirs_is_recursive(self) -> None:
+    def test_os_removedirs_is_recursive_only(self) -> None:
+        """os.removedirs carries recursive but NOT force (only removes empty dirs)."""
         intents = _extract_intents('os.removedirs("/tmp/a")')
         assert intents == [("delete", frozenset({CAP_RECURSIVE}), "/tmp/a")]
 
@@ -276,10 +279,12 @@ class TestAndreapnBypassVectors:
         assert cache.check("rm -rf /a") is True
 
     def test_os_removedirs_approved_covers_rm_r(self) -> None:
-        """os.removedirs('/a') approved -> rm -r /a should be True."""
+        """os.removedirs('/a') approved -> rm -r /a should be True (recursive OK).
+        But rm -rf /a should be False (force NOT approved)."""
         cache = IntentApprovalCache()
         cache.record("os.removedirs('/a')")
         assert cache.check("rm -r /a") is True
+        assert cache.check("rm -rf /a") is False  # force not approved
 
 
 class TestCompoundCommandSeparatorBypass:

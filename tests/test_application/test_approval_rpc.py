@@ -103,8 +103,8 @@ def test_approval_snapshot_and_forget_payloads_own_wire_shapes() -> None:
             "intent_cache_entries": [
                 {
                     "kind": "delete",
-                    "flags": "",
                     "target": normalized_target,
+                    "caps": "",
                     "scope": "always",
                 }
             ],
