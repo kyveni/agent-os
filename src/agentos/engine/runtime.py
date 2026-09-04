@@ -189,6 +189,11 @@ from agentos.session.keys import (
 from agentos.session.terminal_reply import build_terminal_reply, sanitize_agent_error
 from agentos.tools.types import CallerKind, ToolContext
 
+# Fallback lock cache eviction.
+_FALLBACK_LOCK_TTL_SECONDS: Final[float] = 600.0
+_FALLBACK_LOCK_MAX_ENTRIES: Final[int] = 200
+
+
 # Stable user-facing envelope for LLM timeouts.
 _LLM_TIMEOUT_ENVELOPE: dict[str, Any] = {
     "status": "error",
@@ -218,6 +223,36 @@ _ARTIFACT_DELIVERY_TOOL_NAME: Final[str] = "publish_artifact"
 _ARTIFACT_DELIVERY_FAILURE_MAX_CHARS: Final[int] = 360
 
 _HOOKS_FEATURE_ENV: Final[str] = "AGENTOS_HOOKS"
+
+
+def _evict_fallback_lock(
+    locks: dict[str, tuple[asyncio.Lock, float]],
+    key: str,
+    *,
+    now: float | None = None,
+) -> None:
+    """Evict *key* from *locks* after use; purge stale entries when > max.
+
+    Additive guard — existing code calls setdefault + returns lock unchanged.
+    This is called in the else-finally of ``run()`` after the async-with
+    releases the lock, so the entry is safe to remove.
+    """
+    _now = now if now is not None else time.time()
+    locks.pop(key, None)
+    # Stale-entry purge: sweep once per call when the dict exceeds max.
+    if len(locks) > _FALLBACK_LOCK_MAX_ENTRIES:
+        stale_keys = [
+            k for k, (_, ts) in locks.items() if _now - ts > _FALLBACK_LOCK_TTL_SECONDS
+        ]
+        for k in stale_keys:
+            locks.pop(k, None)
+
+
+def _purge_fallback_locks(locks: dict[str, tuple[asyncio.Lock, float]]) -> int:
+    """Remove all entries, return count removed.  Testability hook."""
+    count = len(locks)
+    locks.clear()
+    return count
 
 
 def collect_invoked_skills(
@@ -1707,15 +1742,20 @@ class TurnRunner:
         # Gateway path: task_runtime._get_session_lock_for_turn (wired in boot.py).
         # CLI/standalone path: _standalone_lock_provider from build_turn_runner_from_services.
         # Test/direct-construction path: fallback dict created here inside a closure.
-        # TurnRunner no longer owns a named per-session lock dict as an instance attribute.
-        # The lock dict lives entirely in the provider closure.
+        # _per_session_lock_dict is set by whichever origin path created the dict,
+        # so that run() can evict the session key after the turn completes.
+        self._per_session_lock_dict: dict[str, tuple[asyncio.Lock, float]] | None = None
         if session_lock_provider is None:
-            _fallback_locks: dict[str, asyncio.Lock] = {}
+            _fallback_locks: dict[str, tuple[asyncio.Lock, float]] = {}
 
             def _fallback_provider(key: str) -> asyncio.Lock:
-                return _fallback_locks.setdefault(key, asyncio.Lock())
+                lock, _ = _fallback_locks.setdefault(
+                    key, (asyncio.Lock(), time.time()),
+                )
+                return lock
 
             session_lock_provider = _fallback_provider
+            self._per_session_lock_dict = _fallback_locks
         self._session_lock_provider = session_lock_provider
         # Frozen memory snapshots keyed by (agent_id, session_key).
         # Captured at session start, refreshed on write/compaction.
@@ -2433,6 +2473,17 @@ class TurnRunner:
         """Replace the lock provider at the gateway composition root."""
         self._session_lock_provider = provider
 
+    def set_per_session_lock_dict(
+        self,
+        locks: dict[str, tuple[asyncio.Lock, float]] | None,
+    ) -> None:
+        """Wire the standalone lock dict so run() can evict entries.
+
+        Called by ``build_turn_runner_from_services`` (boot.py) after
+        constructing the standalone lock dict.
+        """
+        self._per_session_lock_dict = locks
+
     @contextlib.asynccontextmanager
     async def _session_write_context(self, session_key: str) -> AsyncIterator[None]:
         lock = self.get_session_lock(session_key)
@@ -2593,6 +2644,8 @@ class TurnRunner:
                 finally:
                     self.clear_compaction_turn_state(session_key)
                     _SESSION_LOCK_OWNER.reset(_token)
+                    if self._per_session_lock_dict is not None:
+                        _evict_fallback_lock(self._per_session_lock_dict, session_key)
 
     async def _run_turn(
         self,
