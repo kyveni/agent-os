@@ -134,7 +134,10 @@ def _comparison_path_candidates(path: str) -> list[str]:
                 # home-prefixed patterns without needing a real UID lookup.
                 if var in ("USER", "LOGNAME"):
                     tilde_expanded = expanded.replace(resolved_stripped, "~", 1)
-                    candidates.append(tilde_expanded.casefold() if os.name == "nt" else tilde_expanded)
+                    if os.name == "nt":
+                        candidates.append(tilde_expanded.casefold())
+                    else:
+                        candidates.append(tilde_expanded)
 
     if raw.startswith("~/"):
         expanded_home = str(Path.home()).replace("\\", "/") + raw[1:]
