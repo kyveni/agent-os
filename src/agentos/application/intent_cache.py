@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 _DEFAULT_TTL_SECONDS = 30 * 60
+_INTENT_CACHE_MAX: int = 2000
 _ALWAYS_TTL_SECONDS = 365 * 24 * 3600  # effectively never expires within a session
 
 
@@ -172,6 +173,7 @@ class IntentApprovalCache:
         with self._lock:
             for intent in intents:
                 self._entries[intent] = (expires, scope)
+            self._evict_stale_entries()
         return intents
 
     def record_always(self, command: str) -> list[tuple[str, str]]:
@@ -206,6 +208,24 @@ class IntentApprovalCache:
         with self._lock:
             for intent in intents:
                 self._entries.pop(intent, None)
+
+    def purge_session(self, intent: tuple[str, str]) -> None:
+        """Evict a specific intent entry."""
+        self._entries.pop(intent, None)
+
+    def _evict_stale_entries(self, *, now: float | None = None) -> None:
+        """Phase 1 (TTL) + Phase 2 (cap) eviction."""
+        if now is None:
+            now = time.monotonic()
+        # Phase 1: remove expired
+        for key, (expires, _scope) in list(self._entries.items()):
+            if expires < now:
+                del self._entries[key]
+        # Phase 2: trim if still over cap
+        if len(self._entries) > _INTENT_CACHE_MAX:
+            excess = len(self._entries) - _INTENT_CACHE_MAX
+            for key in list(self._entries.keys())[:excess]:
+                del self._entries[key]
 
     def clear(self) -> None:
         with self._lock:
