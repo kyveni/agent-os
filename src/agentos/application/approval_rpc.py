@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agentos.application.approval_queue import ApprovalQueue, ApprovalSettings
+from agentos.application.intent_cache import _caps_display
 
 
 def approval_settings_rpc_payload(
@@ -90,8 +91,8 @@ def approval_snapshot_rpc_payload(queue: ApprovalQueue, intent_cache: Any) -> di
         "mode": queue.get_settings().mode,
         "intent_cache_size": len(intent_cache._entries),  # noqa: SLF001 - diagnostic
         "intent_cache_entries": [
-            {"kind": kind, "target": target, "flags": flags, "scope": scope}
-            for (kind, flags, target), (_expires, scope) in intent_cache._entries.items()  # noqa: SLF001
+            {"kind": kind, "target": target, "caps": _caps_display(caps), "scope": scope}
+            for (kind, target, scope), (caps, _expires) in intent_cache._entries.items()  # noqa: SLF001
         ],
     }
 
