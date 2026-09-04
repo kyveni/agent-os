@@ -71,7 +71,8 @@ class TestExtractIntents:
             assert CAP_RECURSIVE in caps
             assert CAP_FORCE in caps
         targets = {t for _, _, t in intents}
-        assert targets == {str(Path("/a").resolve()), str(Path("/b").resolve()), str(Path("/c").resolve())}
+        resolved = {str(Path(x).resolve()) for x in ("/a", "/b", "/c")}
+        assert targets == resolved
 
     def test_shutil_rmtree_is_recursive_force(self) -> None:
         """shutil.rmtree carries recursive + force caps (inherently destructive)."""
