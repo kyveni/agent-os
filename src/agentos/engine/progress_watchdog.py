@@ -22,7 +22,9 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any, Final, Literal
+
+_MAX_REPEAT_TRACKED_KEYS: Final[int] = 500
 
 ProgressAction = Literal["observe", "warn", "block"]
 
@@ -156,6 +158,7 @@ class ProgressWatchdog:
                 flagged = signature
                 flagged_count = count
 
+        self._evict_stale_repeat_cache()
         if flagged is None:
             return None
         return self._decision(
@@ -169,6 +172,13 @@ class ProgressWatchdog:
                 "provider_call_count": observation.provider_call_count,
             },
         )
+
+    def _evict_stale_repeat_cache(self) -> None:
+        if len(self._repeat_counts) > _MAX_REPEAT_TRACKED_KEYS:
+            excess = len(self._repeat_counts) - _MAX_REPEAT_TRACKED_KEYS
+            for key in list(self._repeat_counts.keys())[:excess]:
+                self._repeat_counts.pop(key, None)
+                self._repeat_results.pop(key, None)
 
     def _record_repeated_tool_error(
         self, observation: ProgressObservation
