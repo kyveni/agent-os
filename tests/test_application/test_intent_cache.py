@@ -21,7 +21,11 @@ from agentos.application.intent_cache import (
     CAP_RECURSIVE,
     IntentApprovalCache,
     _extract_intents,
+    _norm_path,
 )
+
+
+NP = _norm_path
 
 
 class TestExtractIntents:
@@ -29,7 +33,7 @@ class TestExtractIntents:
 
     def test_plain_rm_has_no_caps(self) -> None:
         intents = _extract_intents("rm /tmp/a")
-        assert intents == [("delete", frozenset(), "/tmp/a")]
+        assert intents == [("delete", frozenset(), NP("/tmp/a"))]
 
     def test_rm_rf_has_recursive_force(self) -> None:
         intents = _extract_intents("rm -rf /tmp/a")
@@ -42,11 +46,11 @@ class TestExtractIntents:
 
     def test_rm_r_has_recursive_only(self) -> None:
         intents = _extract_intents("rm -r /tmp/a")
-        assert intents == [("delete", frozenset({CAP_RECURSIVE}), "/tmp/a")]
+        assert intents == [("delete", frozenset({CAP_RECURSIVE}), NP("/tmp/a"))]
 
     def test_rm_f_has_force_only(self) -> None:
         intents = _extract_intents("rm -f /tmp/a")
-        assert intents == [("delete", frozenset({CAP_FORCE}), "/tmp/a")]
+        assert intents == [("delete", frozenset({CAP_FORCE}), NP("/tmp/a"))]
 
     def test_long_flags_recursive_force(self) -> None:
         intents = _extract_intents("rm --recursive --force /tmp/a")
@@ -69,38 +73,38 @@ class TestExtractIntents:
             assert CAP_RECURSIVE in caps
             assert CAP_FORCE in caps
         targets = {t for _, _, t in intents}
-        assert targets == {"/a", "/b", "/c"}
+        assert targets == {NP("/a"), NP("/b"), NP("/c")}
 
     def test_shutil_rmtree_is_recursive_force(self) -> None:
         """shutil.rmtree carries recursive + force caps (inherently destructive)."""
         intents = _extract_intents('shutil.rmtree("/tmp/a")')
         caps = frozenset({CAP_RECURSIVE, CAP_FORCE})
-        assert intents == [("delete", caps, "/tmp/a")]
+        assert intents == [("delete", caps, NP("/tmp/a"))]
 
     def test_os_removedirs_is_recursive_only(self) -> None:
         """os.removedirs carries recursive but NOT force (only removes empty dirs)."""
         intents = _extract_intents('os.removedirs("/tmp/a")')
-        assert intents == [("delete", frozenset({CAP_RECURSIVE}), "/tmp/a")]
+        assert intents == [("delete", frozenset({CAP_RECURSIVE}), NP("/tmp/a"))]
 
     def test_os_remove_is_not_recursive(self) -> None:
         intents = _extract_intents('os.remove("/tmp/a")')
-        assert intents == [("delete", frozenset(), "/tmp/a")]
+        assert intents == [("delete", frozenset(), NP("/tmp/a"))]
 
     def test_os_unlink_is_not_recursive(self) -> None:
         intents = _extract_intents('os.unlink("/tmp/a")')
-        assert intents == [("delete", frozenset(), "/tmp/a")]
+        assert intents == [("delete", frozenset(), NP("/tmp/a"))]
 
     def test_os_rmdir_is_not_recursive(self) -> None:
         intents = _extract_intents('os.rmdir("/tmp/a")')
-        assert intents == [("delete", frozenset(), "/tmp/a")]
+        assert intents == [("delete", frozenset(), NP("/tmp/a"))]
 
     def test_path_unlink_is_not_recursive(self) -> None:
         intents = _extract_intents('Path("/tmp/a").unlink()')
-        assert intents == [("delete", frozenset(), "/tmp/a")]
+        assert intents == [("delete", frozenset(), NP("/tmp/a"))]
 
     def test_path_rmdir_is_not_recursive(self) -> None:
         intents = _extract_intents('Path("/tmp/a").rmdir()')
-        assert intents == [("delete", frozenset(), "/tmp/a")]
+        assert intents == [("delete", frozenset(), NP("/tmp/a"))]
 
     def test_sudo_rm_extracts_caps(self) -> None:
         """sudo prefix must not prevent flag extraction."""
@@ -115,9 +119,9 @@ class TestExtractIntents:
         intents = _extract_intents("rm -rf /a; rm /b")
         assert len(intents) == 2
         targets_caps = {t: c for _, c, t in intents}
-        assert CAP_RECURSIVE in targets_caps["/a"]
-        assert CAP_FORCE in targets_caps["/a"]
-        assert targets_caps["/b"] == frozenset()
+        assert CAP_RECURSIVE in targets_caps[NP("/a")]
+        assert CAP_FORCE in targets_caps[NP("/a")]
+        assert targets_caps[NP("/b")] == frozenset()
 
     def test_empty_command_returns_empty(self) -> None:
         assert _extract_intents("") == []
