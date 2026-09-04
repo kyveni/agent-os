@@ -2037,10 +2037,13 @@ def build_turn_runner_from_services(
     # Standalone lock dict for CLI / test paths (no TaskRuntime involved).
     # Gateway path replaces this with task_runtime._get_session_lock_for_turn
     # immediately after task_runtime is constructed.
-    _standalone_locks: dict[str, _asyncio.Lock] = {}
+    _standalone_locks: dict[str, tuple[_asyncio.Lock, float]] = {}
 
     def _standalone_lock_provider(session_key: str) -> _asyncio.Lock:
-        return _standalone_locks.setdefault(session_key, _asyncio.Lock())
+        lock, _ = _standalone_locks.setdefault(
+            session_key, (_asyncio.Lock(), time.time()),
+        )
+        return lock
 
     runner = TurnRunner(
         provider_selector=svc.provider_selector,
@@ -2062,6 +2065,11 @@ def build_turn_runner_from_services(
         compaction_hooks=getattr(svc, "compaction_hooks", None),
         tool_hooks=getattr(svc, "tool_hooks", None),
     )
+    # Wire the standalone lock dict so run() evicts entries after each turn.
+    # hasattr guard keeps tests that monkey-patch TurnRunner with FakeTurnRunner
+    # passing (FakeTurnRunner doesn't carry the eviction API).
+    if hasattr(runner, "set_per_session_lock_dict"):
+        runner.set_per_session_lock_dict(_standalone_locks)
     ref = getattr(svc, "_turn_runner_ref", None)
     if isinstance(ref, list):
         ref.clear()
