@@ -54,6 +54,7 @@ _OPENAI_COMPAT_PROVIDERS = {
     "bankr",
     "volcengine_coding_plan",
     "byteplus_coding_plan",
+    "openai_responses",
     "vllm",
     "lm_studio",
     "ovms",

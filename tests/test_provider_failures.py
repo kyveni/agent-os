@@ -93,3 +93,19 @@ def test_anthropic_request_size_exceeds_is_context_overflow() -> None:
         )
         is ProviderFailureKind.CONTEXT_OVERFLOW
     )
+
+
+def test_openai_compat_providers_are_covered() -> None:
+    """Every provider with failure_family='openai_compat' in registry.py must be in
+    _OPENAI_COMPAT_PROVIDERS in failures.py. Drift detection."""
+    from agentos.provider.registry import _PROVIDER_SPECS
+    from agentos.provider.failures import _OPENAI_COMPAT_PROVIDERS
+
+    missing = set()
+    for provider_id, spec in _PROVIDER_SPECS.items():
+        if spec.failure_family == "openai_compat" and provider_id not in _OPENAI_COMPAT_PROVIDERS:
+            missing.add(provider_id)
+
+    assert not missing, (
+        f"OpenAI-compat providers missing from _OPENAI_COMPAT_PROVIDERS: {sorted(missing)}"
+    )
