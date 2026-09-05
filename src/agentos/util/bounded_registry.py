@@ -186,7 +186,7 @@ class BoundedSessionRegistry[K, V]:
         return self._store.values()
 
     def items(self) -> ItemsView[K, V]:
-        return dict(self._store)
+        return self._store.items()
 
     # -- internal eviction -------------------------------------------------
 
