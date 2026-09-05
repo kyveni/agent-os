@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import time
 from collections import OrderedDict
-from typing import Any, TypeVar
+from typing import Any, TypeVar, overload
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -124,6 +124,12 @@ class BoundedSessionRegistry[K, V]:
 
     # -- public api ------------------------------------------------------
 
+    @overload
+    def get(self, key: K, default: None = None) -> V | None: ...
+
+    @overload
+    def get(self, key: K, default: V) -> V: ...
+
     def get(self, key: K, default: V | None = None) -> V | None:
         try:
             return self[key]  # triggers __getitem__, which evicts stale
@@ -198,5 +204,5 @@ class BoundedSessionRegistry[K, V]:
             "evict_on_access": self._evict_on_access,
             "current_entries": len(self._store),
             "eviction_count": self._eviction_count,
-            "type": f"{type(self).__name__}[{K.__name__},{V.__name__}]",
+            "type": f"{type(self).__name__}",
         }

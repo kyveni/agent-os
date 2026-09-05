@@ -86,7 +86,7 @@ class SessionStreamRegistry:
         if since_stream_seq is None:
             return ReplayResult(current_stream_seq=current, replay_complete=True, events=[])
 
-        events = list(self._events_by_session.get(session_key, ()))
+        events = list(self._events_by_session.get(session_key, deque()))
         if current == 0:
             return ReplayResult(
                 current_stream_seq=0,
