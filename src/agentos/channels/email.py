@@ -47,7 +47,7 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import structlog
 from pydantic import BaseModel, Field
@@ -60,6 +60,7 @@ from agentos.channels._util import (
     AccessDecision,
     ChannelAccessPolicy,
     EventDedupeCache,
+    check_channel_file_size,
 )
 from agentos.channels.contract import (
     ChannelCapabilities,
@@ -311,6 +312,7 @@ class EmailChannel:
     """
 
     config: EmailChannelConfig
+    MAX_ATTACHMENT_BYTES: ClassVar[int] = 25 * 1024 * 1024
 
     _queue: asyncio.Queue[IncomingMessage] = field(
         default_factory=asyncio.Queue, init=False, repr=False
@@ -503,6 +505,8 @@ class EmailChannel:
                     if parsed is None:
                         continue
                     message = self._to_incoming(parsed)
+                    # Acknowledge only after parsing and conversion return normally.
+                    self._mark_seen(client, uid)
                 except Exception as exc:  # noqa: BLE001 — one bad mail, not the batch
                     log.warning("email.message_read_failed", name=self.config.name, error=str(exc))
                     continue
@@ -547,7 +551,6 @@ class EmailChannel:
             self._mark_seen(client, uid)
             return None
 
-        self._mark_seen(client, uid)
         parsed = BytesParser(policy=email_policy).parsebytes(raw)
         return parsed if isinstance(parsed, EmailMessage) else None
 
@@ -786,6 +789,7 @@ class EmailChannel:
 
         path = Path(file_path)
         try:
+            check_channel_file_size(path, self.MAX_ATTACHMENT_BYTES, "Email")
             payload = path.read_bytes()
             to_address, subject, in_reply_to, references = self._resolve_target(
                 OutgoingMessage(content="", reply_to=thread_id)

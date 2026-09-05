@@ -30,6 +30,7 @@ from agentos.channels._util import (
     EventDedupeCache,
     FloodStrikeBackoff,
     StreamThrottle,
+    check_channel_file_size,
 )
 from agentos.channels.contract import (
     ChannelCapabilities,
@@ -177,7 +178,6 @@ def _slice_utf16(text: str, offset: int, length: int) -> str:
     return u16[offset * 2 : (offset + length) * 2].decode("utf-16-le", errors="replace")
 
 
-
 @dataclass
 class TelegramChannel:
     """Managed adapter for Telegram Bot API polling or webhooks."""
@@ -187,6 +187,7 @@ class TelegramChannel:
 
     supports_slash_commands: bool = True
     typing_keepalive_interval_s: ClassVar[float] = 4.0
+    MAX_FILE_BYTES: ClassVar[int] = 50 * 1024 * 1024
     policy: ChannelAccessPolicy = field(
         default_factory=lambda: ChannelAccessPolicy(
             dm_allowed=True,
@@ -1424,6 +1425,7 @@ class TelegramChannel:
         if not self.config.token:
             raise ValueError("telegram.send_file requires token")
         path = Path(file_path)
+        check_channel_file_size(path, self.MAX_FILE_BYTES, "Telegram")
         payload = {"chat_id": str(chat_id)}
         if content:
             payload["caption"] = render_telegram_html(content)

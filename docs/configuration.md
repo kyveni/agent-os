@@ -204,7 +204,7 @@ there is nothing to hide and a visible, diffable setting is easier to share and
 review:
 
 ```sh
-agentos config set skills.config.wiki.path /srv/wiki
+agentos config set skills.config.wiki.path /srv/wiki --config ~/.agentos/config.toml
 ```
 
 When the agent opens the skill, the values currently in effect are appended to

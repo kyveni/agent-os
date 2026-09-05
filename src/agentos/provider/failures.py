@@ -138,6 +138,24 @@ def _is_empty_response(raw_code: str, message: str) -> bool:
     }
 
 
+def _is_insufficient_credits(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in (
+            # OpenAI / OpenAI-compatible providers
+            "insufficient_quota",
+            "insufficient quota",
+            "exceeded your current quota",
+            # Anthropic
+            "billing_error",
+            "credit balance is too low",
+            # Common across gateways
+            "billing hard limit",
+            "exceeded spend limit",
+        )
+    )
+
+
 def _is_gateway_transient(text: str) -> bool:
     return bool(_GATEWAY_TRANSIENT_RE.search(text))
 
@@ -159,6 +177,8 @@ def classify_provider_error(
         return ProviderFailureKind.POLICY_REFUSAL
     if _is_empty_response(raw_code, message):
         return ProviderFailureKind.EMPTY_RESPONSE
+    if _is_insufficient_credits(text):
+        return ProviderFailureKind.INSUFFICIENT_CREDITS
 
     if provider in _OPENAI_COMPAT_PROVIDERS:
         if status_code in {401, 403} or "invalid api key" in text or "unauthorized" in text:
@@ -183,6 +203,8 @@ def classify_provider_error(
     if provider in {"anthropic", "minimax", "minimax_cn", "minimax_global"}:
         if status_code in {401, 403} or "authentication_error" in text:
             return ProviderFailureKind.AUTH_INVALID
+        if status_code == 402 or "billing_error" in text:
+            return ProviderFailureKind.INSUFFICIENT_CREDITS
         if status_code == 429 or "rate_limit_error" in text:
             return ProviderFailureKind.RATE_LIMITED
         if status_code in _GATEWAY_TRANSIENT_STATUS_CODES or "overloaded_error" in text:
@@ -233,3 +255,19 @@ def decide_recovery_action(kind: ProviderFailureKind) -> ProviderRecoveryAction:
     if kind is ProviderFailureKind.AUTH_INVALID:
         return ProviderRecoveryAction.FAIL_CONFIG
     return ProviderRecoveryAction.SURFACE
+
+
+def is_transport_timeout(raw_code: str = "", message: str = "") -> bool:
+    """Return True when the error is specifically a request timeout.
+
+    Transport-transient covers both brief blips (connection reset, DNS hiccup)
+    and hard timeouts (upstream hangs for the full read-timeout window).
+    Timeouts are far less likely to resolve on a simple same-model retry —
+    the upstream is usually genuinely unreachable — so callers can use this
+    to cap retries more aggressively.
+    """
+    code = (raw_code or "").strip().lower()
+    msg = (message or "").strip().lower()
+    if code == "timeout":
+        return True
+    return "timed out" in msg or "request timed out" in msg

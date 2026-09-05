@@ -6,6 +6,253 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.9.5] - 2026-09-05
+
+### Added
+
+- Direct provider endpoints price from native vendor rates instead of falling
+  through to the `_DEFAULT_PRICING` placeholder. Bare model ids without a vendor
+  prefix (`deepseek-chat`, `deepseek-reasoner`, `gemini-2.0-flash`) and
+  date-stamped snapshots (`claude-3-7-sonnet-20250219`, `gpt-4o-2024-08-06`)
+  failed the `startswith` prefix scan and were billed at $3.00/$15.00 per 1M
+  tokens — up to a 21x error in usage tracking and spend rollup for a cheap
+  model. Direct rates for DeepSeek, Anthropic, Google Gemini and OpenAI are now
+  registered alongside their prompt-cache read discounts
+  (`cached_input_per_m`), snapshot suffixes are stripped before lookup, and
+  candidate normalisation is provider-aware. Resolution is scoped to direct
+  endpoints, so aggregator routing and the existing static table baseline are
+  unchanged, and Opus keeps its tiered rates
+  ([#842](https://github.com/use-agent-os/agent-os/issues/842)).
+
+### Fixed
+
+- `TaskRuntime` retains the cached routing envelope while a session has queued
+  or running tasks, evicting it only after the final task for the session reaches
+  a terminal state. This prevents proactive or follow-up sends from losing
+  channel, account, recipient, and thread routing during multi-turn workflows
+  ([#930](https://github.com/use-agent-os/agent-os/issues/930)).
+- `SessionStorage` serializes every runtime method that can commit on the shared
+  SQLite connection. Two coroutines writing concurrently could interleave inside
+  a multi-statement transaction — one committing another's half-written state —
+  and a mutating method that raised or was cancelled left the transaction open
+  for whoever committed next. Write ownership is now held across a complete
+  transaction and an open transaction is rolled back when the method exits with
+  an exception, cancellation included. Migration writes stay outside the lock:
+  they run sequentially during connect, before the storage instance is exposed
+  ([#891](https://github.com/use-agent-os/agent-os/issues/891)).
+- `JobStore.transaction()` rolls back on any `BaseException` instead of leaving
+  uncommitted writes in the shared connection's buffer for a later caller to
+  commit, and a task-bound reentrant write lock serializes `save`, `delete`,
+  `save_execution`, `prune_runs` and `_reserve_job_for_run` so a concurrent
+  writer can no longer commit incomplete batch state out from under an open
+  transaction. Intermediate commits are deferred while a transaction is active
+  ([#964](https://github.com/use-agent-os/agent-os/issues/964)).
+- `SessionWriteLock` evicts a session's entry on `release()` when no acquirer is
+  queued behind it. `_locks` never removed anything, so a long-running gateway
+  retained one `asyncio.Lock` per unique session key for the life of the
+  process; the dict is now bounded by currently active keys rather than every
+  key ever seen. Entries with queued waiters are kept so lock handoff is
+  unaffected ([#966](https://github.com/use-agent-os/agent-os/issues/966)).
+- Auto Pilot falls back across the configured router tiers when a model times
+  out or returns a pre-content error, instead of retrying the same dead endpoint
+  three times and freezing the turn for roughly six minutes. Transport timeouts
+  are classified apart from transient blips, the timeout retry is capped at one,
+  a `provider_timeout_retry` warning is emitted, the fallback chain is derived
+  from the active router tiers, and the terminal error now names the `/c0`,
+  `/c2` and `/auto` escapes
+  ([#860](https://github.com/use-agent-os/agent-os/issues/860)).
+- The session FTS query sanitizer keeps non-ASCII letters. `[^a-zA-Z0-9\s]`
+  stripped every accented Latin, CJK, Cyrillic, Vietnamese and Arabic character
+  before the query reached FTS5, so `café déploiement` searched for
+  `"caf" "d" "ploiement"` and `中文 报告` searched for nothing at all — while the
+  transcripts themselves were indexed correctly. The pattern is now the
+  Unicode-aware `[^\w\s]`, which still strips FTS5 operators
+  ([#903](https://github.com/use-agent-os/agent-os/issues/903)).
+- The Discord adapter no longer cancels itself while reconnecting. When
+  `_heartbeat_loop()` detected a missed ACK and drove a reconnect,
+  `_do_reconnect()` unconditionally cancelled `self._heartbeat_task` — the very
+  task it was running inside — so the coroutine died at the next `await` during
+  socket cleanup, before a new WebSocket or a replacement heartbeat task
+  existed. The cancel is now skipped when the heartbeat task is
+  `asyncio.current_task()`; externally initiated reconnects and adapter
+  shutdown still cancel it
+  ([#882](https://github.com/use-agent-os/agent-os/issues/882)).
+- `list_dir` survives a broken symlink. A dangling link is not a directory, so
+  the size lookup fell through to `entry.stat()`, which follows the link and
+  raised an unhandled `FileNotFoundError` that took down the whole listing. The
+  size query now falls back to `entry.lstat().st_size`, or `0`, on `OSError`
+  ([#844](https://github.com/use-agent-os/agent-os/issues/844)).
+- `agentos cost --export <path>` creates missing parent directories instead of
+  raising `FileNotFoundError`, matching what `render_savings_pdf` already did.
+  Both the JSON and CSV branches are covered
+  ([#846](https://github.com/use-agent-os/agent-os/issues/846)).
+- The gateway debounce buffer is capped at 50 coalesced messages per
+  `session_key` and flushes immediately on reaching the cap, rather than
+  accumulating without bound. The cap-triggered flush retains its delivery task
+  and drains it on shutdown
+  ([#796](https://github.com/use-agent-os/agent-os/issues/796)).
+- Named artifact delivery falls back to a valid filename leaf. When an
+  artifact's metadata carried an empty, whitespace, root or dot-relative target
+  (`""`, `"   "`, `"/"`, `"."`, `".."`), `Path(filename).name` resolved to `""`
+  and the delivery target became the temporary directory itself — the hardlink
+  failed with `FileExistsError` and the `shutil.copy2` fallback handed
+  `send_file` a directory path. The leaf is now sanitized, falling back to the
+  source name or `artifact`
+  ([#742](https://github.com/use-agent-os/agent-os/issues/742)).
+- `robinhood-chain-stocks` withholds price and holding value for a contract it
+  has already disproven. When `uiMultiplier()` reverted — `isStockToken: false`,
+  which `SKILL.md` documents as "not a Stock Token, do not hand over the
+  address" — an impersonator reusing a listed ticker still had the real
+  company's live Chainlink feed attached to it, and `holding.valueUsd`
+  calculated from it, lending a proven fake the credibility of a real price.
+  Price and USD holding value are now withheld with a `readErrors` explanation;
+  `isStockToken: null` still resolves a price, because an unreachable RPC node
+  is not proof of fakery
+  ([#866](https://github.com/use-agent-os/agent-os/issues/866)).
+
+### Security
+
+- `code_exec` detects destructive calls through the AST, not just the regex
+  fast path. `_check_code_destructive` matched shallow patterns only, so
+  reflection and dynamic-import constructs reached the host filesystem without
+  passing the approval gate: `getattr(os, "rem" + "ove")(path)`,
+  `__import__("os").remove(path)`, `importlib.import_module("os").remove(path)`,
+  `exec`/`eval` of a destructive string, `from os import *`, aliased imports and
+  aliased functions. A visitor now runs whenever the regex does not match,
+  resolving statically computable strings (constants, concatenations, f-string
+  values), tracking imports and aliases for `os`, `shutil`, `pathlib`,
+  `subprocess` and `importlib`, and flagging dynamic `getattr` and `__import__`
+  targets. The layer is additive — existing pattern coverage is unchanged
+  ([#848](https://github.com/use-agent-os/agent-os/issues/848)).
+
+## [2026.9.4] - 2026-09-04
+
+### Fixed
+
+- `agentos config set skills.config.<skill>.<key>` persists again. `_set_key`
+  only overwrote keys already present in `to_toml_dict()`, and an empty
+  `skills.config` is omitted there for rollback compatibility, so the documented
+  command could never create the map. Missing intermediate dicts are now created
+  under `skills.config` only, and unknown keys outside that map stay rejected.
+  The no-`--config` path stopped lying too: it printed a fabricated
+  `AGENTOS_GATEWAY_` export and exited 0 for keys that do not bind — including
+  `gateway.port` and every `skills.config.*` key — so a user followed the hint
+  and set an environment variable that nothing reads. Keys are validated against
+  the model first, and the free-form `skills.config` map, which has no env
+  binding, is refused outright
+  ([#834](https://github.com/use-agent-os/agent-os/issues/834)).
+- `load_entries` skips malformed lines in the decisions JSONL instead of raising
+  on the first one. The file is append-only and written once per turn, so a
+  SIGKILL mid-turn, an OOM or a disk-full error can leave a truncated line
+  behind — and `load_entries` is the shared reader for cost-savings reports,
+  session export and pipeline replay, all of which died together. The realistic
+  corruption is not a bad string but a wrong-shape payload, which surfaces as
+  `ValueError`/`TypeError` out of `_filter_payload` rather than
+  `JSONDecodeError`, so all of them are caught. Skips are accounted for: one
+  debug event per line with path, line number and error class, and one warning
+  with the totals at the end, so a partial report announces itself instead of
+  quietly under-reporting. This matches the tolerance
+  `decision_log_aggregate.parse_log_line` already had, so the two readers of the
+  same file now agree on what is fatal
+  ([#812](https://github.com/use-agent-os/agent-os/issues/812)).
+- An MCP client disconnecting no longer takes another client's tool with it.
+  When two servers registered the same tool name, disconnect unregistered the
+  name unconditionally, so the surviving client's tool vanished from the
+  registry. Each active client's exact registry spec and handler are tracked; a
+  colliding tool is unregistered only when the disconnecting client owns the
+  active handler, and otherwise the most recently registered handler from a
+  still-active client is restored
+  ([#801](https://github.com/use-agent-os/agent-os/issues/801)).
+- `background_process` output is capped at 1,000,000 retained characters per
+  session, evicting older chunks so the most recent tail survives. Draining
+  continues past the cap, so a noisy subprocess cannot block on a full pipe, and
+  the retained character count and truncation state are exposed in the process
+  session and log payloads
+  ([#803](https://github.com/use-agent-os/agent-os/issues/803)).
+- Provider credit exhaustion is classified as `INSUFFICIENT_CREDITS` rather than
+  a transient fault. OpenAI returns `insufficient_quota` with HTTP 429, which
+  read as `RATE_LIMITED` and tripped the circuit breaker for a billing fault no
+  cooldown can heal; Anthropic returns `billing_error` with HTTP 402, which read
+  as `UNKNOWN` and carried no recovery hint. A cross-provider
+  `_is_insufficient_credits()` check runs before the status-code branch, so the
+  raw code and message win over the ambiguous 429
+  ([#777](https://github.com/use-agent-os/agent-os/issues/777)).
+- CLI JSON output survives a non-UTF-8 terminal encoding.
+  `json.dumps(..., ensure_ascii=False)` emits raw non-ASCII, and on a Windows
+  code page (cp1252, cp437) `sys.stdout.write` raised `UnicodeEncodeError`.
+  `_write_json_text` writes UTF-8 bytes to the underlying binary buffer when one
+  exists — lossless, so the JSON contract holds for pipes and files — and falls
+  back to the text layer with `errors="backslashreplace"`, which keeps the data
+  as round-trippable `\uXXXX` escapes instead of destroying an em dash into `?`
+  ([#764](https://github.com/use-agent-os/agent-os/issues/764)).
+- Memory-write refresh callbacks reach the running turn.
+  `build_turn_runner_from_services` never populated `svc._turn_runner_ref`, so
+  `_on_memory_write` had nothing to call and `refresh_memory_snapshot(agent_id)`
+  never ran on the active `TurnRunner`
+  ([#761](https://github.com/use-agent-os/agent-os/issues/761)).
+- `apply_patch` records `UpdateFile` in `ctx.workspace_file_writes`. Only
+  `AddFile` was recorded, so a patch that edited an existing file left the
+  engine's auto-publish path with nothing to publish, even though `UpdateFile`
+  is a peer of `AddFile` everywhere else in the module. The parser also accepts
+  the optional line counts in a standard `@@ -a,b +c,d @@` hunk header
+  ([#753](https://github.com/use-agent-os/agent-os/issues/753)).
+- `parse_version()` understands a bare `.dev` suffix and sorts dev
+  pre-releases per PEP 440. There was a fallback defaulting a bare `.post` to
+  `0` but none for `.dev`, so `2026.7.18.dev` parsed with `dev = None`, fell
+  through to the final-release phase and compared equal to `2026.7.18` —
+  suppressing the `is_newer()` update notice for every development install
+  ([#740](https://github.com/use-agent-os/agent-os/issues/740)).
+- Email is marked seen after the message is converted, not before, so a failure
+  mid-conversion leaves the message unread and eligible for the next poll
+  ([#719](https://github.com/use-agent-os/agent-os/issues/719)).
+- `robinhood-chain-stocks` handles a non-dict RPC error payload. `_eth_call`
+  assumed `error` was a mapping and crashed when a node returned a plain string
+  ([#815](https://github.com/use-agent-os/agent-os/issues/815)).
+- `gmgn-wallet-score` prints usage instead of crashing. `score.py` indexed
+  `sys.argv[1]` and `sys.argv[2]` unguarded, so running it with too few
+  arguments raised an unhandled `IndexError`; it now validates argument count,
+  exits 2 with usage on stderr, and answers `-h`/`--help` with exit 0
+  ([#819](https://github.com/use-agent-os/agent-os/issues/819)).
+- Frontend line endings are normalised so Prettier stops failing on Windows
+  checkouts. `.gitattributes` marks frontend sources `text=auto` — not a blanket
+  `eol=lf`, which would have flagged PNG, webp and woff2 assets as text and
+  corrupted them — and Prettier is configured with `endOfLine: "auto"`
+  ([#825](https://github.com/use-agent-os/agent-os/issues/825)).
+
+### Security
+
+- Invisible Unicode characters are normalised before intent-phrase matching. A
+  soft hyphen, word joiner, zero-width space or bidi isolator placed between two
+  words split the intent-phrase regexes, so a prompt-injection payload evaded
+  the guard entirely in both report and enforce mode. `classify_injection` now
+  normalises invisible codepoints to a space before matching the non-invisible
+  patterns, while `invisible_char` is still matched against the original text so
+  the smuggling technique itself is reported rather than erased
+  ([#690](https://github.com/use-agent-os/agent-os/issues/690)).
+- Search results carry their provider origin, so text returned by a search
+  backend is attributable when the injection guard inspects it
+  ([#688](https://github.com/use-agent-os/agent-os/issues/688)).
+- Per-IP rate limiting covers the Control UI API subtree.
+  `RateLimitMiddleware._is_ui_path()` exempted the entire Control UI prefix,
+  including everything mounted under `{base_path}/api/*`, so
+  `/control/api/sessions`, `/control/api/chat` and `/control/api/config` took
+  unlimited unauthenticated requests. It now mirrors the check
+  `AuthMiddleware._is_ui_path()` already had
+  ([#748](https://github.com/use-agent-os/agent-os/issues/748)).
+- `send_file` checks file size before reading. Every channel adapter opened or
+  read the file first, so a large attachment meant memory exhaustion — the
+  email adapter base64-expands the whole payload in memory — or a long upload
+  that ended in an API rejection. `check_channel_file_size` stats the file up
+  front against each service's real ceiling (Discord 10 MB, Telegram 50 MB,
+  email 25 MB) and raises with the limit named
+  ([#683](https://github.com/use-agent-os/agent-os/issues/683)).
+- `robinhood-chain-stocks` rejects a non-`http(s)` `--rpc-url`. The URL reached
+  the HTTP layer unvalidated, so a `file://` URL turned an RPC call into a local
+  file read; empty URLs and a bare `http://` are refused as well
+  ([#816](https://github.com/use-agent-os/agent-os/issues/816)).
+
+## [2026.9.3] - 2026-09-03
+
 ### Added
 
 - **Inline card grids in Web chat** — a second AgentOS-native artifact mime,
@@ -30,6 +277,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the lookup's JSON on stdin and emits the artifact, so an address answer in the
   Web UI arrives as a grid with the verification badge attached to each result.
   `docs/artifacts-and-media.md` documents the payload.
+
+- **Skills publish their own artifacts.** `exec_command` now honours a
+  `publish_artifact path=<file> mime=application/vnd.agentos.<x>+json` marker on
+  a command's own output, so a skill that writes a chart or card payload gets it
+  rendered without the model deciding to publish it. Live-testing the card
+  renderer produced the same outcome seven times across two models: the script
+  ran, the payload was written, and the answer came back as a hand-written
+  markdown table with the artifact stranded in the workspace — a render that
+  only happens when the model feels like it is not a contract.
+
+  Only the `application/vnd.agentos.` family auto-publishes, so ordinary command
+  output cannot push a workspace file at the user; a plain file still needs a
+  deliberate `publish_artifact` call. The marker must own its line, so prose
+  mentioning it is inert; at most four publish per command, with the overflow
+  reported rather than dropped; and `publish_artifact`'s workspace containment
+  is unchanged. The whole path is best-effort — a shell command never fails, and
+  never loses its output, because a publish did not work out. This also fixes
+  the existing `gmgn-token` and `gmgn-market` chart artifacts, which had the
+  same failure mode. Both Robinhood skills now write their card payload on every
+  run (`<SYMBOL>.cards.json`, marker on stderr so stdout stays pure JSON,
+  `--no-cards` to opt out), and `robinhood-chain-stocks` gains
+  `scripts/chain_cards.py`.
+
+- Cards identify their subject with a locally drawn ticker monogram. The card
+  grid has a logo slot, but the console's CSP is
+  `img-src 'self' data: https://raw.githubusercontent.com`, so a token-list CDN
+  image is blocked outright and the card was quietly dropping the broken `img`
+  and showing nothing. Widening the CSP would also tell that CDN which tickers a
+  user is researching, from their IP — a real leak on a finance surface, for
+  decoration. The monogram needs no request and no trademarked artwork; the
+  `logo` img is still attached and still takes over, but only on a real `load`,
+  so an `error` now leaves the monogram standing instead of an empty slot.
 
 ### Fixed
 
@@ -176,6 +455,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   where `_mtimes` is empty and the watcher diff could never have recovered the
   path (#638).
 
+- `OtlpTraceSink.flush()` is serialized by the `_flush_lock` it always
+  declared but never acquired. Concurrent flushes — a `write()` batch trigger
+  racing the periodic flush task — could post to the OTLP collector
+  simultaneously, delivering spans out of order and, when a post failed,
+  re-queueing the same events twice so they were duplicated in the queue. The
+  lock is now held across the drain-post-requeue cycle, with an empty-queue
+  fast path before it so the uncontended case stays allocation-free
+  ([#672](https://github.com/use-agent-os/agent-os/issues/672)).
+- `agentos sessions export` derives its default filename through
+  `_safe_archive_part` instead of only replacing `:`. A session id is
+  gateway-supplied text, and every character outside `[A-Za-z0-9_.-]` — a `/`
+  or a `..` segment among them — reached `Path()` untouched, so the export
+  could be written outside the directory the command was run in. The shared
+  helper also now strips leading and trailing dots, so an id that sanitizes to
+  `..` can no longer name the parent directory
+  ([#678](https://github.com/use-agent-os/agent-os/issues/678)).
+- HTTP chat errors name the provider that actually failed.
+  `_provider_display_name` mapped only a handful of kinds, so Azure, Bailian,
+  Mistral, Groq, SiliconFlow, AIHubMix, MiniMax, BytePlus, Bankr, vLLM,
+  LM Studio and OVMS all surfaced as a generic "Provider" in the message the
+  user reads.
+
 ### Security
 
 - The strict SSRF fetch guard now enforces the cloud-metadata floor directly
@@ -219,6 +520,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   httpx to resolve the hostname a second time, which a short-TTL DNS-rebinding
   name can answer differently. Non-`http(s)` server URLs are now rejected up
   front. ([#662](https://github.com/use-agent-os/agent-os/issues/662))
+
+- Slack webhooks are rejected when no signing secret is configured, instead of
+  being ingested. `_handle_webhook` logged a warning and carried on:
+  `event_callback` payloads were ingested and slash commands were enqueued, so
+  any unauthenticated POST to the Events API endpoint could inject messages and
+  commands into a session — only interactive form payloads were turned away.
+  The handler now fails closed. Without a signing secret it still answers the
+  `url_verification` handshake — that only echoes a challenge and has no side
+  effects, so an operator can pass Slack's endpoint check while wiring the
+  secret up — and returns 401 for everything else
+  ([#674](https://github.com/use-agent-os/agent-os/issues/674)).
+- Slack request signatures are verified against the raw request bytes. The
+  base string was assembled as text (`f"v0:{timestamp}:{body.decode()}"`) and
+  re-encoded, so any body whose bytes do not survive a UTF-8 decode/encode
+  round-trip — and any body that fails to decode at all, which raises inside
+  the verifier — was checked against a different byte sequence than the one
+  Slack signed. The HMAC is now computed over `b"v0:" + timestamp + b":" +
+  body` with the body never decoded
+  ([#680](https://github.com/use-agent-os/agent-os/issues/680)).
 
 ## [2026.9.2] - 2026-09-02
 

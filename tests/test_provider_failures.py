@@ -109,3 +109,94 @@ def test_openai_compat_providers_are_covered() -> None:
     assert not missing, (
         f"OpenAI-compat providers missing from _OPENAI_COMPAT_PROVIDERS: {sorted(missing)}"
     )
+
+
+# ── INSUFFICIENT_CREDITS regressions ─────────────────────────────────
+
+
+def test_openai_insufficient_quota_429_is_credits() -> None:
+    """OpenAI returns insufficient_quota with HTTP 429.
+
+    Before this fix the 429 status code was caught by the rate-limit check
+    first, misclassifying the error as RATE_LIMITED.  RATE_LIMITED is a
+    circuit-breaker-tripping kind; INSUFFICIENT_CREDITS is not, so the
+    misclassification could park a healthy provider for a billing fault
+    that a cooldown can never heal.
+    """
+    assert (
+        classify_provider_error(
+            provider_name="openai",
+            status_code=429,
+            raw_code="insufficient_quota",
+            message=(
+                "You exceeded your current quota, please check your plan "
+                "and billing details."
+            ),
+        )
+        is ProviderFailureKind.INSUFFICIENT_CREDITS
+    )
+
+
+def test_openai_exceeded_quota_message_is_credits() -> None:
+    """Quota message without the raw code should still be caught."""
+    assert (
+        classify_provider_error(
+            provider_name="openai",
+            status_code=429,
+            message="You exceeded your current quota.",
+        )
+        is ProviderFailureKind.INSUFFICIENT_CREDITS
+    )
+
+
+def test_anthropic_billing_error_402_is_credits() -> None:
+    """Anthropic billing_error with HTTP 402 was previously UNKNOWN."""
+    assert (
+        classify_provider_error(
+            provider_name="anthropic",
+            status_code=402,
+            raw_code="billing_error",
+            message="Your credit balance is too low to access the Anthropic API.",
+        )
+        is ProviderFailureKind.INSUFFICIENT_CREDITS
+    )
+
+
+def test_anthropic_credit_balance_too_low_is_credits() -> None:
+    """Anthropic credit balance message without status code should match."""
+    assert (
+        classify_provider_error(
+            provider_name="anthropic",
+            status_code=None,
+            message="Your credit balance is too low to access the Anthropic API.",
+        )
+        is ProviderFailureKind.INSUFFICIENT_CREDITS
+    )
+
+
+def test_openrouter_insufficient_quota_is_credits() -> None:
+    """Same insufficient_quota pattern routed through OpenRouter."""
+    assert (
+        classify_provider_error(
+            provider_name="openrouter",
+            status_code=429,
+            raw_code="insufficient_quota",
+            message="You exceeded your current quota.",
+        )
+        is ProviderFailureKind.INSUFFICIENT_CREDITS
+    )
+
+
+def test_deepseek_insufficient_quota_is_credits() -> None:
+    """DeepSeek quota exhaustion should not be classified as RATE_LIMITED."""
+    assert (
+        classify_provider_error(
+            provider_name="deepseek",
+            status_code=429,
+            raw_code="insufficient_quota",
+            message="Insufficient quota to complete the request.",
+        )
+        is ProviderFailureKind.INSUFFICIENT_CREDITS
+    )
+
+

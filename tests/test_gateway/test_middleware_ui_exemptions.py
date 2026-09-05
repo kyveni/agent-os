@@ -102,3 +102,21 @@ def test_http_token_auth_rejects_wrong_token(tmp_path) -> None:
 
     assert response.status_code == 401
     assert response.json()["code"] == "UNAUTHORIZED"
+
+
+def test_control_ui_api_subtree_is_rate_limited_while_shell_is_exempt(tmp_path) -> None:
+    config = _config(tmp_path, base_path="/control", max_requests=2)
+    headers = {"authorization": "Bearer test-token"}
+    with TestClient(create_gateway_app(config), base_url="http://localhost") as client:
+        # API calls under /control/api/ are rate-limited
+        r1 = client.get("/control/api/config", headers=headers)
+        r2 = client.get("/control/api/config", headers=headers)
+        r3 = client.get("/control/api/config", headers=headers)
+        assert r1.status_code != 429
+        assert r2.status_code != 429
+        assert r3.status_code == 429
+
+        # Static UI shell under /control is exempt from rate limiting
+        for _ in range(5):
+            shell_resp = client.get("/control/")
+            assert shell_resp.status_code != 429

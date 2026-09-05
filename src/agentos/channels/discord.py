@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 import httpx
 import structlog
@@ -29,6 +29,7 @@ from agentos.channels._util import (
     EventDedupeCache,
     RateLimiter,
     StreamThrottle,
+    check_channel_file_size,
     retry_request,
 )
 from agentos.channels.contract import (
@@ -308,7 +309,8 @@ class DiscordChannel:
 
     async def _do_reconnect(self) -> None:
         log.info("discord.reconnecting", session_id=self._state.session_id)
-        if self._heartbeat_task is not None:
+        current = asyncio.current_task()
+        if self._heartbeat_task is not None and self._heartbeat_task is not current:
             self._heartbeat_task.cancel()
             self._heartbeat_task = None
         await self._close_ws()
@@ -1016,12 +1018,15 @@ class DiscordChannel:
             provider_message_id=str(data.get("id", "")),
         )
 
+    MAX_FILE_BYTES: ClassVar[int] = 10 * 1024 * 1024
+
     async def send_file(
         self,
         channel_id: str,
         file_path: str,
         content: str = "",
     ) -> ChannelSendResult:
+        check_channel_file_size(file_path, self.MAX_FILE_BYTES, "Discord")
         await self._rate_limiter.acquire()
         client = self._get_client()
         with open(file_path, "rb") as f:

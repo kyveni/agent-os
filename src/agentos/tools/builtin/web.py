@@ -657,7 +657,15 @@ def _search_payload(
     payload = {
         "query": query,
         "provider": provider_name,
-        "results": [{"title": r.title, "url": r.url, "snippet": r.snippet} for r in results],
+        "results": [
+            {
+                "title": r.title,
+                "url": r.url,
+                "snippet": r.snippet,
+                "source": r.source or "",
+            }
+            for r in results
+        ],
     }
     if fallback_from:
         payload["fallback_from"] = fallback_from

@@ -331,7 +331,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def _is_ui_path(self, path: str) -> bool:
         if self._ui_prefix is None:
             return False
-        return _is_under(self._ui_prefix, path)
+        if not _is_under(self._ui_prefix, path):
+            return False
+        if path == self._ui_prefix + _UI_BOOTSTRAP_SUFFIX:
+            return True
+        return not _is_under(self._ui_prefix + _API_PREFIX, path)
 
     def _is_trusted_proxy(self, peer_ip: str | None) -> bool:
         return peer_is_trusted_proxy(self._config.auth.trusted_proxy, peer_ip)

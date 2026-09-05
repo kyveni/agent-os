@@ -10,6 +10,8 @@ are both called "GameStop" with symbol GME).
 from __future__ import annotations
 
 import importlib.util
+import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -269,6 +271,7 @@ def _price_chain(answer: int, updated_at: int, paused: int = 0) -> _FakeChain:
     proxy = str(_FEEDS[0]["proxyAddress"]).lower()
     return _FakeChain(
         {
+            (AAPL, chain_stocks.SEL_UI_MULTIPLIER): "0x" + _word_hex(10**18),
             (AAPL, chain_stocks.SEL_ORACLE_PAUSED): "0x" + _word_hex(paused),
             (proxy, chain_stocks.SEL_LATEST_ROUND_DATA): "0x"
             + "".join(_word_hex(v) for v in (1, answer, 0, updated_at, 1)),
@@ -353,6 +356,153 @@ def test_reverting_contract_is_still_reported_as_not_a_stock_token(
     assert chain_stocks.inspect_token("rpc", FAKE_GME, 5.0)["isStockToken"] is False
 
 
+def test_impersonator_withholds_price_and_usd_valuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An impersonator reverting on uiMultiplier() must not receive a live price quote (#866).
+
+    Handing an impersonator a genuine Chainlink price/valuation gives it borrowed credibility.
+    Price and valueUsd must be withheld, and notes/readErrors must explain why.
+    """
+    gme_feed = {
+        "name": "Robinhood GME / USD",
+        "proxyAddress": "0x6b22gme",
+        "heartbeat": 86400,
+        "threshold": 0.5,
+        "docs": {"baseAsset": "GME"},
+    }
+    proxy = str(gme_feed["proxyAddress"]).lower()
+    round_data = "0x" + "".join(_word_hex(v) for v in (1, 2500000000, 1788206000, 1788206389, 1))
+    holder = "0x" + "9" * 40
+
+    chain = _FakeChain(
+        {
+            (FAKE_GME, chain_stocks.SEL_SYMBOL): "0x"
+            + _word_hex(32)
+            + _word_hex(3)
+            + b"GME".hex().ljust(64, "0"),
+            (FAKE_GME, chain_stocks.SEL_DECIMALS): "0x" + _word_hex(18),
+            (FAKE_GME, chain_stocks.SEL_TOTAL_SUPPLY): "0x" + _word_hex(10**24),
+            (FAKE_GME, chain_stocks.SEL_BALANCE_OF): "0x" + _word_hex(10 * 10**18),
+            # SEL_UI_MULTIPLIER is omitted so it reverts (answered=True, multiplier=None)
+            (proxy, chain_stocks.SEL_LATEST_ROUND_DATA): round_data,
+            (proxy, chain_stocks.SEL_DECIMALS): "0x" + _word_hex(8),
+        }
+    )
+    monkeypatch.setattr(chain_stocks, "_eth_call", chain)
+
+    state = chain_stocks.inspect_token(
+        "rpc",
+        FAKE_GME,
+        5.0,
+        holder=holder,
+        feeds=[gme_feed],
+        now=1788206389 + 60,
+    )
+
+    assert state["isStockToken"] is False
+    assert state["onchainSymbol"] == "GME"
+    assert "price" not in state
+    assert state["holding"]["balanceFormatted"] == pytest.approx(10.0)
+    assert "valueUsd" not in state["holding"]
+    assert "price" in state["readErrors"]
+    assert "failed the Stock Token check" in state["readErrors"]["price"]
+    assert any("failed the Stock Token check" in n for n in state.get("notes", []))
+
+
+def test_impersonator_withholds_price_when_feed_passed_directly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gme_feed = {
+        "name": "Robinhood GME / USD",
+        "proxyAddress": "0x6b22gme",
+        "heartbeat": 86400,
+        "threshold": 0.5,
+        "docs": {"baseAsset": "GME"},
+    }
+    proxy = str(gme_feed["proxyAddress"]).lower()
+    round_data = "0x" + "".join(_word_hex(v) for v in (1, 2500000000, 1788206000, 1788206389, 1))
+
+    chain = _FakeChain(
+        {
+            (FAKE_GME, chain_stocks.SEL_SYMBOL): "0x"
+            + _word_hex(32)
+            + _word_hex(3)
+            + b"GME".hex().ljust(64, "0"),
+            (FAKE_GME, chain_stocks.SEL_DECIMALS): "0x" + _word_hex(18),
+            (proxy, chain_stocks.SEL_LATEST_ROUND_DATA): round_data,
+            (proxy, chain_stocks.SEL_DECIMALS): "0x" + _word_hex(8),
+        }
+    )
+    monkeypatch.setattr(chain_stocks, "_eth_call", chain)
+
+    state = chain_stocks.inspect_token("rpc", FAKE_GME, 5.0, feed=gme_feed)
+    assert state["isStockToken"] is False
+    assert "price" not in state
+    assert "failed the Stock Token check" in state["readErrors"]["price"]
+
+
+def test_unreachable_node_keeps_current_behaviour_for_feed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When uiMultiplier cannot be reached (None), do not collapse with False."""
+    feed = _FEEDS[0]
+    proxy = str(feed["proxyAddress"]).lower()
+    round_data = "0x" + "".join(_word_hex(v) for v in (1, 31747461437, 1788206000, 1788206389, 1))
+
+    def _call(_rpc: str, to: str, data: str, _timeout: float) -> str:
+        if to.lower() == AAPL.lower() and data[:10] == chain_stocks.SEL_UI_MULTIPLIER:
+            raise OSError("connection timeout")
+        if to.lower() == proxy and data[:10] == chain_stocks.SEL_LATEST_ROUND_DATA:
+            return round_data
+        if to.lower() == proxy and data[:10] == chain_stocks.SEL_DECIMALS:
+            return "0x" + _word_hex(8)
+        raise chain_stocks.RpcError("execution reverted")
+
+    monkeypatch.setattr(chain_stocks, "_eth_call", _call)
+    state = chain_stocks.inspect_token("rpc", AAPL, 5.0, feed=feed, now=1788206389 + 60)
+    assert state["isStockToken"] is None
+    # Price read was not withheld because it wasn't a confirmed False
+    assert state["price"]["usd"] == pytest.approx(317.47461437)
+
+
+def test_main_with_address_impersonator_withholds_price(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    gme_feed = {
+        "name": "Robinhood GME / USD",
+        "proxyAddress": "0x6b22gme",
+        "heartbeat": 86400,
+        "threshold": 0.5,
+        "docs": {"baseAsset": "GME"},
+    }
+    chain = _FakeChain(
+        {
+            (FAKE_GME, chain_stocks.SEL_SYMBOL): "0x"
+            + _word_hex(32)
+            + _word_hex(3)
+            + b"GME".hex().ljust(64, "0"),
+            (FAKE_GME, chain_stocks.SEL_DECIMALS): "0x" + _word_hex(18),
+        }
+    )
+    monkeypatch.setattr(chain_stocks, "_eth_call", chain)
+    monkeypatch.setattr(
+        chain_stocks, "_http_json", lambda _url, _timeout, _payload=None: [gme_feed]
+    )
+    monkeypatch.setattr(sys, "argv", ["chain_stocks.py", "--address", FAKE_GME])
+
+    rc = chain_stocks.main()
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    token = out["token"]
+    assert token["isStockToken"] is False
+    assert "price" not in token
+    assert "price" in token["readErrors"]
+    assert "failed the Stock Token check" in token["readErrors"]["price"]
+    assert any("failed the Stock Token check" in n for n in token.get("notes", []))
+    assert not any("no Chainlink feed published" in n for n in token.get("notes", []))
+
+
 # --- skill packaging --------------------------------------------------------
 
 
@@ -368,3 +518,105 @@ def test_skill_documents_the_read_only_boundary() -> None:
     assert "read-only" in body.lower()
     assert "uiMultiplier()" in body
     assert "4663" in body
+
+
+# ---------------------------------------------------------------------------
+# #815/#816: --rpc-url validation + non-dict RPC error handling
+# ---------------------------------------------------------------------------
+
+
+def test_validate_http_url_rejects_non_http_schemes() -> None:
+    """file://, ftp://, gopher://, javascript: are all rejected."""
+    for invalid in [
+        "file:///etc/passwd",
+        "file:///c:/windows/system32/drivers/etc/hosts",
+        "ftp://rpc.example.com",
+        "gopher://example.com",
+        "javascript:alert(1)",
+    ]:
+        with pytest.raises(ValueError, match="must be http:// or https://"):
+            chain_stocks._validate_http_url(invalid)
+    for empty in ["", "   "]:
+        with pytest.raises(ValueError, match="empty URL"):
+            chain_stocks._validate_http_url(empty)
+    assert chain_stocks._validate_http_url("http://127.0.0.1:8545") == "http://127.0.0.1:8545"
+    assert (
+        chain_stocks._validate_http_url("https://rpc.mainnet.chain.robinhood.com")
+        == "https://rpc.mainnet.chain.robinhood.com"
+    )
+
+
+def test_validate_http_url_rejects_missing_host() -> None:
+    with pytest.raises(ValueError, match="missing host"):
+        chain_stocks._validate_http_url("http://")
+
+
+def test_validate_http_url_accepts_valid_variants() -> None:
+    assert chain_stocks._validate_http_url("http://example.com") == "http://example.com"
+    assert (
+        chain_stocks._validate_http_url("https://user:pass@host.com:8545")
+        == "https://user:pass@host.com:8545"
+    )
+    assert chain_stocks._validate_http_url("http://[::1]:7545") == "http://[::1]:7545"
+    assert chain_stocks._validate_http_url(chain_stocks.DEFAULT_RPC_URL)
+
+
+def test_http_json_rejects_file_scheme() -> None:
+    with pytest.raises(ValueError, match="must be http:// or https://"):
+        chain_stocks._http_json("file:///etc/passwd", timeout=5.0)
+
+
+def test_http_json_rejects_empty_url() -> None:
+    with pytest.raises(ValueError, match="empty URL"):
+        chain_stocks._http_json("", timeout=5.0)
+
+
+def test_main_rejects_invalid_rpc_url(capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+    code = chain_stocks.main(["--address",
+        "0x0000000000000000000000000000000000000000",
+        "--rpc-url", "file:///etc/passwd"])
+    assert code == 0
+    out, _ = capsys.readouterr()
+    payload = json.loads(out)
+    assert "invalid rpc-url" in payload.get("error", "")
+    assert "must be http:// or https://" in payload.get("error", "")
+
+
+def test_main_rejects_missing_host_url(capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+    code = chain_stocks.main(["--address",
+        "0x0000000000000000000000000000000000000000",
+        "--rpc-url", "http://"])
+    assert code == 0
+    out, _ = capsys.readouterr()
+    payload = json.loads(out)
+    assert "missing host" in payload.get("error", "")
+
+
+def test_eth_call_handle_nondict_error() -> None:
+    """#816: a string RPC error no longer crashes _eth_call."""
+    from unittest.mock import patch
+
+    def mock_http_json(*args, **kwargs):
+        return {"error": "something went wrong"}
+
+    with patch.object(chain_stocks, "_http_json", side_effect=mock_http_json):
+        with pytest.raises(chain_stocks.RpcError) as exc:
+            chain_stocks._eth_call("http://127.0.0.1:8545",
+                "0x0000000000000000000000000000000000000000", "0x", 5.0)
+        assert "something went wrong" in str(exc.value)
+
+
+def test_eth_call_handle_dict_error() -> None:
+    """#816: a dict RPC error is handled the same as before."""
+    from unittest.mock import patch
+
+    def mock_http_json(*args, **kwargs):
+        return {"error": {"message": "execution reverted"}}
+
+    with patch.object(chain_stocks, "_http_json", side_effect=mock_http_json):
+        with pytest.raises(chain_stocks.RpcError) as exc:
+            chain_stocks._eth_call("http://127.0.0.1:8545",
+                "0x0000000000000000000000000000000000000000", "0x", 5.0)
+        assert "execution reverted" in str(exc.value)

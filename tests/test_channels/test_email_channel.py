@@ -690,6 +690,44 @@ def test_poll_parses_and_marks_seen(monkeypatch: pytest.MonkeyPatch) -> None:
     assert fake.closed is True
 
 
+def test_poll_retries_message_after_transient_conversion_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel = EmailChannel(config=_config())
+    fake = _FakeIMAP(_raw().as_bytes())
+    monkeypatch.setattr(channel, "_imap_connect", lambda: fake)
+    real_to_incoming = channel._to_incoming
+    attempts = 0
+
+    def _flaky(parsed: EmailMessage) -> IncomingMessage | None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise ValueError("transient conversion failure")
+        return real_to_incoming(parsed)
+
+    monkeypatch.setattr(channel, "_to_incoming", _flaky)
+
+    assert channel._fetch_unseen() == []
+    assert fake.stored == []
+
+    messages = channel._fetch_unseen()
+
+    assert [message.sender_id for message in messages] == ["owner@example.com"]
+    assert fake.stored == [("7", "+FLAGS", "\\Seen")]
+
+
+def test_poll_marks_deliberately_filtered_message_seen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel = EmailChannel(config=_config())
+    fake = _FakeIMAP(_raw(sender="stranger@example.net").as_bytes())
+    monkeypatch.setattr(channel, "_imap_connect", lambda: fake)
+
+    assert channel._fetch_unseen() == []
+    assert fake.stored == [("7", "+FLAGS", "\\Seen")]
+
+
 def test_poll_skips_a_message_larger_than_the_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     channel = EmailChannel(config=_config(max_message_bytes=32))
     fake = _FakeIMAP(_raw().as_bytes(), size=10_000)
@@ -722,6 +760,7 @@ def test_one_unreadable_message_does_not_sink_the_poll(
 
     assert calls == ["7", "8"]
     assert len(messages) == 1
+    assert fake.stored == [("8", "+FLAGS", "\\Seen")]
 
 
 @pytest.mark.parametrize(

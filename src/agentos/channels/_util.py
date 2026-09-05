@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 import random
 import time
 from collections import OrderedDict
@@ -308,6 +309,29 @@ def _retry_after_delay(header: str | None, fallback: float) -> float:
     if not math.isfinite(delay) or delay < 0.0:
         return fallback
     return min(delay, MAX_RETRY_AFTER_S)
+
+
+def check_channel_file_size(
+    path: str | os.PathLike[str],
+    limit_bytes: int,
+    adapter_name: str,
+) -> int:
+    """Check that *path* does not exceed *limit_bytes*.
+
+    Returns the file size in bytes on success.
+    Raises ValueError with an actionable message if the file exceeds the ceiling.
+    """
+    try:
+        size = os.path.getsize(path)
+    except OSError as exc:
+        raise ValueError(f"Cannot read file size for {path}: {exc}") from exc
+    if size > limit_bytes:
+        limit_mb = limit_bytes // (1024 * 1024)
+        raise ValueError(
+            f"File too large: {size:,} bytes exceeds {adapter_name} "
+            f"{limit_mb} MB upload ceiling ({limit_bytes:,} bytes)"
+        )
+    return size
 
 
 async def retry_request(
