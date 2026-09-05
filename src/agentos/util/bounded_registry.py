@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import time
 from collections import OrderedDict
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -41,7 +41,7 @@ def _discard_from_all(session_key: str) -> None:
             pass
 
 
-class BoundedSessionRegistry(Generic[K, V]):
+class BoundedSessionRegistry[K, V]:
     """A dict-like bounded registry with TTL and LRU eviction.
 
     Two lifetime shapes (from gh-1131):

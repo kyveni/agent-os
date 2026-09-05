@@ -35,7 +35,6 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from agentos.sandbox.stale_output_cache import StaleOutputCache, get_stale_output_cache
-from agentos.util.bounded_registry import BoundedSessionRegistry, _register_session_scoped
 from agentos.sandbox.types import (
     ALLOW,
     ApprovalDecision,
@@ -47,6 +46,7 @@ from agentos.sandbox.types import (
     SecurityLevel,
     SuggestedNextStep,
 )
+from agentos.util.bounded_registry import BoundedSessionRegistry, _register_session_scoped
 
 log = logging.getLogger(__name__)
 

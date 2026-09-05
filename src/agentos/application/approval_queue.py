@@ -8,13 +8,12 @@ import os
 import sqlite3
 import time
 import uuid
-
-from agentos.util.bounded_registry import BoundedSessionRegistry, _register_session_scoped
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
 from agentos.paths import state_dir
+from agentos.util.bounded_registry import BoundedSessionRegistry, _register_session_scoped
 
 VALID_APPROVAL_MODES = frozenset({"auto-approve", "auto-deny", "prompt"})
 VALID_ELEVATED_MODES = frozenset({"on", "bypass", "full"})

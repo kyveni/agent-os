@@ -6,13 +6,12 @@ import asyncio
 import json
 import time
 import uuid
-
-from agentos.util.bounded_registry import BoundedSessionRegistry
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentos.agents.limits import MAX_SPAWN_DEPTH
+from agentos.util.bounded_registry import BoundedSessionRegistry
 
 if TYPE_CHECKING:
     from .agent import Agent

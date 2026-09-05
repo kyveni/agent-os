@@ -37,11 +37,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentos.util.bounded_registry import BoundedSessionRegistry
-
 import yaml
 
 from agentos.compat import aiosqlite
+from agentos.util.bounded_registry import BoundedSessionRegistry
 
 __all__ = [
     "HEARTBEAT_TEMPLATE_PATH",

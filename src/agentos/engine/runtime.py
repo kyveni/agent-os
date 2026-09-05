@@ -1726,9 +1726,9 @@ class TurnRunner:
         # Frozen bootstrap snapshots keyed by (agent_id, session_key, context_mode).
         # Captured on first prompt assembly so bootstrap-source edits do not
         # churn the cacheable prefix mid-session.
-        self._bootstrap_snapshots: BoundedSessionRegistry[tuple[str, str, str], BootstrapSnapshot] = (
-            BoundedSessionRegistry(max_entries=500, ttl_seconds=3600)
-        )
+        self._bootstrap_snapshots: BoundedSessionRegistry[
+            tuple[str, str, str], BootstrapSnapshot
+        ] = BoundedSessionRegistry(max_entries=500, ttl_seconds=3600)
         # User turns since the last memory review, keyed (agent_id, session_key).
         self._memory_nudge_counters: dict[tuple[str, str], int] = {}
         self._compaction_failures: dict[str, _CompactionFailureState] = {}

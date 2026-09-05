@@ -33,12 +33,12 @@ from agentos.gateway.routing import RouteEnvelope, SourceKind
 from agentos.gateway.session_lifecycle import TaskLifecycleEvent, TaskLifecycleListener
 from agentos.session.keys import canonicalize_session_key, normalize_agent_id, parse_agent_id
 from agentos.session.models import AgentTaskRecord, AgentTaskStatus
-from agentos.util.bounded_registry import BoundedSessionRegistry, _register_session_scoped
 from agentos.session.terminal_reply import (
     build_terminal_reply,
     is_context_payload_too_large,
     sanitize_agent_error,
 )
+from agentos.util.bounded_registry import BoundedSessionRegistry, _register_session_scoped
 
 log = structlog.get_logger(__name__)
 
