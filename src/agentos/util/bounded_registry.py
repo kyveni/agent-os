@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import time
 from collections import OrderedDict
+from collections.abc import ItemsView, Iterator, KeysView, ValuesView
 from typing import Any, TypeVar, overload
 
 K = TypeVar("K")
@@ -90,6 +91,9 @@ class BoundedSessionRegistry[K, V]:
 
     # -- dict-like interface ------------------------------------------------
 
+    def __iter__(self) -> Iterator[K]:
+        return iter(self._store)
+
     def __getitem__(self, key: K) -> V:
         if self._evict_on_access:
             self._evict_stale()
@@ -161,11 +165,27 @@ class BoundedSessionRegistry[K, V]:
         self._birth.clear()
         return n
 
+    def update(self, other: BoundedSessionRegistry[K, V] | dict[K, V]) -> None:
+        self._store.update(other)
+        for k in other:
+            self._store.move_to_end(k)
+        self._birth.update({k: time.time() for k in other})
+        self._evict()
+
     @property
     def eviction_count(self) -> int:
         return self._eviction_count
 
     def snapshot(self) -> dict[K, V]:
+        return dict(self._store)
+
+    def keys(self) -> KeysView[K]:
+        return self._store.keys()
+
+    def values(self) -> ValuesView[V]:
+        return self._store.values()
+
+    def items(self) -> ItemsView[K, V]:
         return dict(self._store)
 
     # -- internal eviction -------------------------------------------------
