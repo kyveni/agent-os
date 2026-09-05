@@ -31,12 +31,13 @@ import asyncio
 import json
 import re
 import uuid
-from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from agentos.util.bounded_registry import BoundedSessionRegistry
 
 import yaml
 
@@ -152,7 +153,9 @@ class HeartbeatRunner:
 
     def __init__(self, config: HeartbeatConfig | None = None) -> None:
         self._config = config or HeartbeatConfig()
-        self._buffers: dict[str, list[HeartbeatEvent]] = defaultdict(list)
+        self._buffers: BoundedSessionRegistry[str, list[HeartbeatEvent]] = (
+            BoundedSessionRegistry(max_entries=5000, ttl_seconds=300)
+        )
         self._last_tick: dict[str, datetime] = {}
 
     @property
@@ -164,10 +167,10 @@ class HeartbeatRunner:
         self._config = config
 
     def ingest(self, event: HeartbeatEvent) -> None:
-        self._buffers[event.priority].append(event)
+        self._buffers.setdefault(event.priority, []).append(event)
 
     def pending_counts(self) -> dict[str, int]:
-        return {band: len(events) for band, events in self._buffers.items() if events}
+        return {band: len(events) for band, events in self._buffers.snapshot().items() if events}
 
     def poll(self, now: datetime | None = None) -> list[HeartbeatTick]:
         moment = now or datetime.now(UTC)
@@ -177,7 +180,7 @@ class HeartbeatRunner:
         emitted: list[HeartbeatTick] = []
         window_ms = self._config.coalesce_window_ms
 
-        for band, events in list(self._buffers.items()):
+        for band, events in self._buffers.snapshot().items():
             if not events:
                 continue
 
@@ -198,7 +201,7 @@ class HeartbeatRunner:
             )
             emitted.append(tick)
             self._last_tick[band] = moment
-            self._buffers[band] = []
+            self._buffers[band] = []  # type: ignore[assignment]
 
         return emitted
 
